@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'create' %}مستخدم جديد{% else %}تعديل مستخدم{% endif %} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-lg">
+  <div class="mb-5 flex items-center gap-3">
+    <a href="{% url 'user_list' %}" class="btn btn-ghost btn-sm btn-circle">→</a>
+    <h1 class="text-2xl font-bold">
+      {% if mode == 'create' %}إنشاء مستخدم جديد{% else %}تعديل {{ user_obj.full_name }}{% endif %}
+    </h1>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-3">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        {% if mode == 'create' %}
+          {% include "partials/field.html" with field=form.username %}
+        {% else %}
+          <div class="rounded-box bg-base-200/60 p-3 text-sm">
+            اسم الدخول: <span class="nums font-medium">{{ user_obj.username }}</span>
+          </div>
+        {% endif %}
+
+        {% include "partials/field.html" with field=form.full_name %}
+        {% include "partials/field.html" with field=form.role %}
+        {% include "partials/field.html" with field=form.password %}
+
+        {% if mode == 'edit' %}
+        <label class="label cursor-pointer justify-start gap-3">
+          {{ form.is_active }}
+          <span class="label-text text-sm">{{ form.is_active.label }}</span>
+        </label>
+        {% endif %}
+
+        <div class="flex justify-end gap-2 pt-2">
+          <a href="{% url 'user_list' %}" class="btn btn-ghost btn-sm">إلغاء</a>
+          <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

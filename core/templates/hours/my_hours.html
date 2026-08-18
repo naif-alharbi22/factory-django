@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}تحضير الموظفين — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-4xl">
+  <div class="mb-5">
+    <h1 class="text-2xl font-bold">مرحباً، {{ user.full_name }}</h1>
+    <p class="mt-1 text-sm opacity-60">{{ today|date:"l، j F Y" }} — تسجيل ساعات العمل</p>
+  </div>
+
+  <div class="mb-4 grid gap-4 sm:grid-cols-3">
+    {% include "partials/stat.html" with label="سجلات اليوم" value=today_count unit="سجل" icon="📝" tone="primary" %}
+    {% include "partials/stat.html" with label="المشاريع النشطة" value=active_projects unit="مشروع" icon="🚧" tone="info" %}
+    {% include "partials/stat.html" with label="آخر السجلات" value=recent|length unit="سجل" icon="🕒" tone="success" %}
+  </div>
+
+  <div class="card mb-4 bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">تسجيل ساعات عمل</h2>
+
+      <form method="post" class="mt-2 space-y-3">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          {% include "partials/field.html" with field=form.worker %}
+          {% include "partials/field.html" with field=form.project %}
+        </div>
+        <div class="grid gap-3 sm:grid-cols-3">
+          {% include "partials/field.html" with field=form.date %}
+          {% include "partials/field.html" with field=form.regular_hours %}
+          {% include "partials/field.html" with field=form.overtime_hours %}
+        </div>
+        {% include "partials/field.html" with field=form.notes %}
+
+        <button type="submit" class="btn btn-primary w-full">تسجيل الساعات</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">آخر التسجيلات</h2>
+      <div class="mt-2 overflow-x-auto">
+        <table class="table table-sm">
+          <thead><tr><th>الموظف</th><th>المشروع</th><th>التاريخ</th><th class="text-left">عادية</th><th class="text-left">إضافية</th></tr></thead>
+          <tbody>
+            {% for row in recent %}
+            <tr class="hover">
+              <td class="font-medium">{{ row.worker.name }}</td>
+              <td class="text-xs opacity-70">{{ row.project.name|default:"—" }}</td>
+              <td class="nums text-xs">{{ row.date|date:"Y-m-d" }}</td>
+              <td class="nums text-left">{{ row.regular_hours|hours }}</td>
+              <td class="nums text-left">{{ row.overtime_hours|hours }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">{% include "partials/empty.html" with title="لا توجد تسجيلات بعد" %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

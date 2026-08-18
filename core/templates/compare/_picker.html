@@ -1,0 +1,23 @@
+<div id="picker">
+  <form method="get" action="{% url 'compare' %}" class="mt-3">
+    {% if search %}<input type="hidden" name="q" value="{{ search }}">{% endif %}
+    <div class="max-h-96 space-y-1 overflow-y-auto pl-1">
+      {% for project in candidates %}
+      <label class="flex cursor-pointer items-start gap-2 rounded-box p-2 hover:bg-base-200">
+        <input type="checkbox" name="ids" value="{{ project.pk }}" class="checkbox checkbox-xs checkbox-primary mt-0.5"
+               {% if project.pk in ids %}checked{% endif %}>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-xs font-medium">{{ project.name }}</span>
+          <span class="block truncate text-[10px] opacity-50">{{ project.client_name|default:"—" }}</span>
+        </span>
+      </label>
+      {% empty %}
+        <p class="py-6 text-center text-xs opacity-50">لا توجد نتائج</p>
+      {% endfor %}
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm mt-3 w-full">قارن</button>
+    {% if ids %}
+      <a href="{% url 'compare' %}" class="btn btn-ghost btn-xs mt-2 w-full">مسح التحديد</a>
+    {% endif %}
+  </form>
+</div>

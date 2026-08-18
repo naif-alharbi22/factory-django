@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}الموظفون — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">إدارة الموظفين</h1>
+    <p class="mt-1 text-sm opacity-60">
+      <span class="nums">{{ total }}</span> موظف · <span class="nums">{{ active_count }}</span> نشط
+    </p>
+  </div>
+  {% if user.can_edit_data %}
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-sm btn-outline" onclick="hours_modal.showModal()">تحضير موظف</button>
+    <a href="{% url 'worker_create' %}" class="btn btn-sm btn-primary">+ موظف جديد</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card mb-4 bg-base-100 shadow-sm">
+  <div class="card-body p-4">
+    <form hx-get="{% url 'worker_list' %}" hx-target="#workers-table" hx-swap="outerHTML"
+          hx-trigger="submit, change from:input[type=checkbox], keyup changed delay:400ms from:input[name=search]"
+          hx-push-url="true" class="flex flex-wrap items-center gap-3">
+      <input type="search" name="search" value="{{ search }}" placeholder="بحث بالاسم أو الهوية أو الوظيفة"
+             class="input input-bordered input-sm flex-1 min-w-56">
+      <label class="label cursor-pointer gap-2">
+        <input type="checkbox" name="active" value="1" class="checkbox checkbox-sm checkbox-primary"
+               {% if active_only %}checked{% endif %}>
+        <span class="label-text text-xs">النشطون فقط</span>
+      </label>
+    </form>
+  </div>
+</div>
+
+{% include "workers/_table.html" %}
+
+{% if user.can_edit_data %}
+<dialog id="hours_modal" class="modal">
+  <div class="modal-box">
+    <h3 class="text-lg font-bold">تحضير موظف في مشروع</h3>
+    <p class="mt-1 text-xs opacity-60">تسجيل ساعات العمل العادية والإضافية</p>
+    <form method="post" action="{% url 'hours_add' %}" class="mt-4 space-y-3">
+      {% csrf_token %}
+      {% include "partials/field.html" with field=hours_form.worker %}
+      {% include "partials/field.html" with field=hours_form.project %}
+      <div class="grid gap-3 sm:grid-cols-3">
+        {% include "partials/field.html" with field=hours_form.date %}
+        {% include "partials/field.html" with field=hours_form.regular_hours %}
+        {% include "partials/field.html" with field=hours_form.overtime_hours %}
+      </div>
+      {% include "partials/field.html" with field=hours_form.notes %}
+      <div class="modal-action">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="hours_modal.close()">إلغاء</button>
+        <button type="submit" class="btn btn-primary btn-sm">تسجيل الساعات</button>
+      </div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>إغلاق</button></form>
+</dialog>
+{% endif %}
+{% endblock %}

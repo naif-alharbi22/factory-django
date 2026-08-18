@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.sqlite3
+db.sqlite3
+staticfiles/
+media/
+node_modules/
+.env
+
+# Supabase
+supabase/.temp/
+supabase/.branches/

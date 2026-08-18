@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}الرئيسية — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<!-- الترويسة -->
+<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">لوحة المعلومات</h1>
+    <p class="mt-1 text-sm opacity-60">{{ today|date:"l، j F Y" }}</p>
+  </div>
+  {% if user.can_edit_data %}
+  <div class="flex flex-wrap gap-2">
+    <a href="{% url 'compare' %}" class="btn btn-sm btn-outline">مقارنة المشاريع</a>
+    <a href="{% url 'project_create' %}" class="btn btn-sm btn-primary">+ مشروع جديد</a>
+  </div>
+  {% endif %}
+</div>
+
+<!-- البطاقات الإحصائية -->
+<div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  {% include "partials/stat.html" with label="إجمالي المشاريع" value=stats.total_projects unit="مشروع" icon="📁" tone="primary" %}
+  {% include "partials/stat.html" with label="قيد التنفيذ" value=stats.active_projects unit="مشروع" icon="🚧" tone="info" %}
+  {% include "partials/stat.html" with label="الموظفون النشطون" value=stats.total_workers unit="موظف" icon="👷" tone="success" %}
+  {% include "partials/stat.html" with label="إجمالي الميزانيات" value=stats.total_budget|money0 unit="ريال" icon="💰" tone="warning" %}
+</div>
+
+<div class="mb-6 grid gap-4 lg:grid-cols-2">
+  <!-- توزيع الحالات -->
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">توزيع المشاريع حسب الحالة</h2>
+      <div class="mt-2 space-y-3">
+        {% for row in stats.status_counts %}
+        <div>
+          <div class="mb-1 flex items-center justify-between text-xs">
+            <span class="font-medium">{{ row.label }}</span>
+            <span class="nums opacity-70">{{ row.cnt }}</span>
+          </div>
+          <div class="h-2 w-full overflow-hidden rounded-full bg-base-300">
+            <div class="h-full rounded-full bg-primary" style="width: {{ row.cnt|bar_width:max_status }}%"></div>
+          </div>
+        </div>
+        {% empty %}
+          {% include "partials/empty.html" %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- توزيع الأنواع -->
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">توزيع المشاريع حسب النوع</h2>
+      <div class="mt-2 space-y-3">
+        {% for row in stats.type_counts %}
+        <div>
+          <div class="mb-1 flex items-center justify-between text-xs">
+            <span class="font-medium">{{ row.name }}</span>
+            <span class="nums opacity-70">{{ row.cnt }}</span>
+          </div>
+          <div class="h-2 w-full overflow-hidden rounded-full bg-base-300">
+            <div class="h-full rounded-full bg-accent" style="width: {{ row.cnt|bar_width:max_type }}%"></div>
+          </div>
+        </div>
+        {% empty %}
+          {% include "partials/empty.html" %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- أعلى المشاريع تكلفة -->
+<div class="mb-6 card bg-base-100 shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title text-base">أعلى المشاريع من حيث التكلفة</h2>
+    <div class="mt-2 space-y-2">
+      {% for project in stats.top_projects %}
+      <a href="{% url 'project_detail' project.pk %}"
+         class="flex items-center gap-3 rounded-box border border-base-200 p-3 transition-[border-color,box-shadow] hover:border-primary/40 hover:bg-base-200/60">
+        <div class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{{ forloop.counter }}</div>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-medium">{{ project.name }}</div>
+          <div class="mt-0.5 text-xs opacity-60">
+            <span class="badge badge-xs {{ project.status|status_badge }}">{{ project.status_label }}</span>
+          </div>
+        </div>
+        <div class="shrink-0 text-left">
+          <div class="nums text-sm font-bold">{{ project.cost.total_cost|money }}</div>
+          <div class="text-[11px] opacity-50">ريال</div>
+        </div>
+      </a>
+      {% empty %}
+        {% include "partials/empty.html" %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- المشاريع قيد التنفيذ -->
+<div class="card bg-base-100 shadow-sm">
+  <div class="card-body">
+    <div class="flex items-center justify-between">
+      <h2 class="card-title text-base">المشاريع قيد التنفيذ</h2>
+      <a href="{% url 'project_list' %}?status=IN_PROGRESS" class="link link-primary text-xs">عرض الكل ←</a>
+    </div>
+
+    <div class="mt-2 overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>المشروع</th>
+            <th>النوع</th>
+            <th class="text-left">الميزانية</th>
+            <th class="text-left">التكلفة</th>
+            <th class="w-40">الاستخدام</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for project in active_projects %}
+          <tr class="hover">
+            <td>
+              <div class="font-medium">{{ project.name }}</div>
+              {% if project.code %}<div class="text-[11px] opacity-50">{{ project.code }}</div>{% endif %}
+            </td>
+            <td class="text-xs opacity-70">{{ project.type.name|default:"—" }}</td>
+            <td class="nums text-left">{{ project.cost.budget|money0 }}</td>
+            <td class="nums text-left">{{ project.cost.total_cost|money }}</td>
+            <td>
+              <div class="flex items-center gap-2">
+                <progress class="progress progress-{{ project.cost.status_class }} w-20"
+                          value="{{ project.cost.usage_capped }}" max="100"></progress>
+                <span class="nums text-xs opacity-70">{{ project.cost.usage_percent|pct }}%</span>
+              </div>
+            </td>
+            <td class="text-left">
+              <a href="{% url 'project_detail' project.pk %}" class="btn btn-ghost btn-xs">عرض</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6">{% include "partials/empty.html" with title="لا توجد مشاريع قيد التنفيذ" %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'create' %}فاتورة جديدة{% else %}تعديل فاتورة{% endif %} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl">
+  <div class="mb-5 flex items-center gap-3">
+    <a href="{% url 'invoice_list' %}" class="btn btn-ghost btn-sm btn-circle">→</a>
+    <div>
+      <h1 class="text-2xl font-bold">{% if mode == 'create' %}فاتورة جديدة{% else %}تعديل الفاتورة{% endif %}</h1>
+      {% if mode == 'create' %}
+        <p class="mt-1 text-xs opacity-60">الرقم التلقائي: <span class="nums font-medium">{{ next_number }}</span></p>
+      {% else %}
+        <p class="mt-1 text-xs opacity-60"><span class="nums font-medium">{{ invoice.invoice_number }}</span></p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        {% include "partials/field.html" with field=form.project %}
+        {% include "partials/field.html" with field=form.title %}
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          {% include "partials/field.html" with field=form.issue_date %}
+          {% include "partials/field.html" with field=form.due_date %}
+          {% include "partials/field.html" with field=form.total_amount %}
+          {% include "partials/field.html" with field=form.paid_amount %}
+          {% include "partials/field.html" with field=form.tax_percentage %}
+          {% include "partials/field.html" with field=form.status %}
+        </div>
+
+        {% include "partials/field.html" with field=form.description %}
+        {% include "partials/field.html" with field=form.notes %}
+
+        <div class="flex justify-end gap-2 pt-2">
+          <a href="{% url 'invoice_list' %}" class="btn btn-ghost btn-sm">إلغاء</a>
+          <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

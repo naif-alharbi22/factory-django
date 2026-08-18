@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}تسجيل الدخول — {{ APP_TITLE }}{% endblock %}
+{% block chrome %}{% endblock %}
+{% block main_class %}min-h-screen{% endblock %}
+
+{% block content %}
+<div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-primary px-4 py-10">
+
+  <!-- خلفية زخرفية -->
+  <div class="pointer-events-none absolute inset-0 opacity-20">
+    <div class="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-primary-content/30 blur-3xl"></div>
+    <div class="absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-accent/40 blur-3xl"></div>
+  </div>
+
+  <div class="relative w-full max-w-md">
+    <div class="mb-8 text-center text-primary-content">
+      <div class="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-primary-content/15 text-3xl backdrop-blur">🏭</div>
+      <h1 class="text-2xl font-bold">نظام إدارة المصنع</h1>
+      <p class="mt-1 text-sm opacity-75">الزجاج والألمنيوم والواجهات</p>
+    </div>
+
+    <div class="card bg-base-100 shadow-2xl">
+      <div class="card-body gap-4">
+        <div>
+          <h2 class="text-lg font-bold">تسجيل الدخول</h2>
+          <p class="mt-1 text-xs opacity-60">أدخل بياناتك للوصول إلى النظام</p>
+        </div>
+
+        {% if form.non_field_errors %}
+          <div role="alert" class="alert alert-error py-2">
+            <span class="text-sm">{{ form.non_field_errors.0 }}</span>
+          </div>
+        {% endif %}
+
+        <form method="post" class="space-y-3">
+          {% csrf_token %}
+          {% include "partials/field.html" with field=form.username %}
+          {% include "partials/field.html" with field=form.password %}
+          <button type="submit" class="btn btn-primary mt-2 w-full">
+            دخول إلى النظام
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <p class="mt-6 text-center text-xs text-primary-content/60">
+      نظام إدارة مشاريع الزجاج والألمنيوم
+    </p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}الفواتير — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">الفواتير</h1>
+    <p class="mt-1 text-sm opacity-60"><span class="nums">{{ total }}</span> فاتورة</p>
+  </div>
+  {% if user.can_edit_data %}
+    <a href="{% url 'invoice_create' %}" class="btn btn-sm btn-primary">+ فاتورة جديدة</a>
+  {% endif %}
+</div>
+
+<div class="mb-4 grid gap-4 sm:grid-cols-3">
+  {% include "partials/stat.html" with label="إجمالي الفواتير" value=totals.total|money0 unit="ريال" icon="🧾" tone="primary" %}
+  {% include "partials/stat.html" with label="المدفوع" value=totals.paid|money0 unit="ريال" icon="✅" tone="success" %}
+  {% include "partials/stat.html" with label="المتبقي" value=remaining|money0 unit="ريال" icon="⏳" tone="warning" %}
+</div>
+
+<div class="card mb-4 bg-base-100 shadow-sm">
+  <div class="card-body p-4">
+    <form hx-get="{% url 'invoice_list' %}" hx-target="#invoices-table" hx-swap="outerHTML"
+          hx-trigger="submit, change from:select, keyup changed delay:400ms from:input[name=search]"
+          hx-push-url="true" class="flex flex-wrap items-center gap-3">
+      <input type="search" name="search" value="{{ search }}" placeholder="بحث برقم الفاتورة أو البيان"
+             class="input input-bordered input-sm flex-1 min-w-56">
+      <select name="status" class="select select-bordered select-sm">
+        <option value="ALL">كل الحالات</option>
+        {% for value, label in statuses %}
+          <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+{% include "invoices/_table.html" %}
+{% endblock %}

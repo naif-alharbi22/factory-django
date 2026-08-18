@@ -1,0 +1,66 @@
+{% load fmt %}
+<div id="invoices-table" class="card bg-base-100 shadow-sm">
+  <div class="overflow-x-auto">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>رقم الفاتورة</th><th>المشروع</th><th>البيان</th><th>الإصدار</th>
+          <th class="text-left">الإجمالي</th><th class="text-left">المدفوع</th>
+          <th class="text-left">المتبقي</th><th>الحالة</th>{% if user.can_edit_data %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for invoice in invoices %}
+        <tr class="hover">
+          <td class="nums font-medium">{{ invoice.invoice_number|default:"—" }}</td>
+          <td class="max-w-40 truncate text-xs">
+            {% if invoice.project %}
+              <a href="{% url 'project_detail' invoice.project.pk %}" class="link link-hover">{{ invoice.project.name }}</a>
+            {% else %}<span class="opacity-50">—</span>{% endif %}
+          </td>
+          <td class="max-w-40 truncate text-xs opacity-70">{{ invoice.title|default:"—" }}</td>
+          <td class="nums text-xs">{{ invoice.issue_date|date:"Y-m-d" }}</td>
+          <td class="nums text-left">{{ invoice.total_amount|money }}</td>
+          <td class="nums text-left text-success">{{ invoice.paid_amount|money }}</td>
+          <td class="nums text-left {% if invoice.remaining > 0 %}text-warning{% endif %}">{{ invoice.remaining|money }}</td>
+          <td><span class="badge badge-sm {{ invoice.status|status_badge }}">{{ invoice.get_status_display }}</span></td>
+          {% if user.can_edit_data %}
+          <td class="text-left">
+            <div class="flex justify-end gap-1">
+              <a href="{% url 'invoice_edit' invoice.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+              <form method="post" action="{% url 'invoice_delete' invoice.pk %}"
+                    onsubmit="return confirm('حذف الفاتورة {{ invoice.invoice_number }}؟')">
+                {% csrf_token %}
+                <button class="btn btn-ghost btn-xs text-error">حذف</button>
+              </form>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="9">{% include "partials/empty.html" with title="لا توجد فواتير مطابقة" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="flex items-center justify-between gap-3 border-t border-base-200 p-3">
+    <span class="text-xs opacity-60">
+      صفحة <span class="nums">{{ page_obj.number }}</span> من <span class="nums">{{ page_obj.paginator.num_pages }}</span>
+    </span>
+    <div class="join">
+      {% if page_obj.has_previous %}
+        <button class="btn join-item btn-sm"
+                hx-get="{% url 'invoice_list' %}?page={{ page_obj.previous_page_number }}&search={{ search|urlencode }}&status={{ status }}"
+                hx-target="#invoices-table" hx-swap="outerHTML" hx-push-url="true">السابق</button>
+      {% else %}<button class="btn join-item btn-sm btn-disabled">السابق</button>{% endif %}
+      {% if page_obj.has_next %}
+        <button class="btn join-item btn-sm"
+                hx-get="{% url 'invoice_list' %}?page={{ page_obj.next_page_number }}&search={{ search|urlencode }}&status={{ status }}"
+                hx-target="#invoices-table" hx-swap="outerHTML" hx-push-url="true">التالي</button>
+      {% else %}<button class="btn join-item btn-sm btn-disabled">التالي</button>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

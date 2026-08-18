@@ -1,0 +1,12 @@
+{# حقل نموذج واحد #}
+<label class="form-control w-full">
+  <div class="label py-1">
+    <span class="label-text text-xs font-medium">{{ field.label }}{% if field.field.required %} <span class="text-error">*</span>{% endif %}</span>
+  </div>
+  {{ field }}
+  {% if field.errors %}
+    <div class="label py-1"><span class="label-text-alt text-error">{{ field.errors.0 }}</span></div>
+  {% elif field.help_text %}
+    <div class="label py-1"><span class="label-text-alt opacity-60">{{ field.help_text }}</span></div>
+  {% endif %}
+</label>

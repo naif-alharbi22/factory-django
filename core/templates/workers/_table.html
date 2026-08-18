@@ -1,0 +1,52 @@
+{% load fmt %}
+<div id="workers-table" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+  {% for worker in workers %}
+  <div class="card bg-base-100 shadow-sm transition-shadow hover:shadow-md">
+    <div class="card-body p-4">
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex min-w-0 items-center gap-3">
+          <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 font-bold text-primary">
+            {{ worker.name|initials }}
+          </div>
+          <div class="min-w-0">
+            <a href="{% url 'worker_detail' worker.pk %}" class="link link-hover block truncate font-medium">{{ worker.name }}</a>
+            <div class="truncate text-xs opacity-60">{{ worker.position|default:"—" }}{% if worker.nationality %} · {{ worker.nationality }}{% endif %}</div>
+          </div>
+        </div>
+        <span class="badge badge-sm {% if worker.is_active %}badge-success{% else %}badge-ghost{% endif %}">
+          {% if worker.is_active %}نشط{% else %}موقوف{% endif %}
+        </span>
+      </div>
+
+      <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div class="rounded-box bg-base-200/60 p-2">
+          <div class="text-[10px] opacity-60">الراتب</div>
+          <div class="nums text-sm font-bold">{{ worker.base_salary|money0 }}</div>
+        </div>
+        <div class="rounded-box bg-base-200/60 p-2">
+          <div class="text-[10px] opacity-60">أجر الساعة</div>
+          <div class="nums text-sm font-bold text-success">{{ worker.hourly_rate|money }}</div>
+        </div>
+        <div class="rounded-box bg-base-200/60 p-2">
+          <div class="text-[10px] opacity-60">الإضافي</div>
+          <div class="nums text-sm font-bold text-warning">{{ worker.effective_overtime_rate|money }}</div>
+        </div>
+      </div>
+
+      <div class="mt-2 flex items-center justify-between gap-2 text-[11px] opacity-60">
+        <span>{% if worker.id_number %}هوية: <span class="nums">{{ worker.id_number }}</span>{% else %}—{% endif %}</span>
+        <div class="flex gap-1">
+          <a href="{% url 'worker_detail' worker.pk %}" class="btn btn-ghost btn-xs">عرض</a>
+          {% if user.can_edit_data %}
+            <a href="{% url 'worker_edit' worker.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="sm:col-span-2 xl:col-span-3">
+    {% include "partials/empty.html" with title="لا يوجد موظفون مطابقون" %}
+  </div>
+  {% endfor %}
+</div>

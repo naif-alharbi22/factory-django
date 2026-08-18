@@ -1,0 +1,74 @@
+{% load fmt %}
+<div id="projects-table" class="card bg-base-100 shadow-sm">
+  <div class="overflow-x-auto">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>المشروع</th>
+          <th>العميل</th>
+          <th>النوع</th>
+          <th>الحالة</th>
+          <th class="text-left">الميزانية</th>
+          <th class="text-left">التكلفة</th>
+          <th class="text-left">المتبقي</th>
+          <th class="w-40">الاستخدام</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for project in projects %}
+        <tr class="hover">
+          <td>
+            <div class="font-medium">{{ project.name }}</div>
+            {% if project.code %}<div class="text-[11px] opacity-50">{{ project.code }}</div>{% endif %}
+          </td>
+          <td class="text-xs opacity-70">{{ project.client_name|default:"—" }}</td>
+          <td class="text-xs opacity-70">{{ project.type.name|default:"—" }}</td>
+          <td><span class="badge badge-sm {{ project.status|status_badge }}">{{ project.status_label }}</span></td>
+          <td class="nums text-left">{{ project.cost.budget|money0 }}</td>
+          <td class="nums text-left">{{ project.cost.total_cost|money }}</td>
+          <td class="nums text-left {% if project.cost.remaining < 0 %}text-error font-medium{% endif %}">
+            {{ project.cost.remaining|money }}
+          </td>
+          <td>
+            <div class="flex items-center gap-2">
+              <progress class="progress progress-{{ project.cost.status_class }} w-20"
+                        value="{{ project.cost.usage_capped }}" max="100"></progress>
+              <span class="nums text-xs opacity-70">{{ project.cost.usage_percent|pct }}%</span>
+            </div>
+          </td>
+          <td class="text-left">
+            <a href="{% url 'project_detail' project.pk %}" class="btn btn-ghost btn-xs">عرض</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9">{% include "partials/empty.html" with title="لا توجد مشاريع مطابقة" hint="جرّب تغيير كلمة البحث أو التصفية" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="flex items-center justify-between gap-3 border-t border-base-200 p-3">
+    <span class="text-xs opacity-60">
+      صفحة <span class="nums">{{ page_obj.number }}</span> من <span class="nums">{{ page_obj.paginator.num_pages }}</span>
+    </span>
+    <div class="join">
+      {% if page_obj.has_previous %}
+        <button class="btn join-item btn-sm"
+                hx-get="{% url 'project_list' %}?page={{ page_obj.previous_page_number }}&search={{ search|urlencode }}&status={{ status }}&type={{ type_id }}"
+                hx-target="#projects-table" hx-swap="outerHTML" hx-push-url="true">السابق</button>
+      {% else %}
+        <button class="btn join-item btn-sm btn-disabled">السابق</button>
+      {% endif %}
+      {% if page_obj.has_next %}
+        <button class="btn join-item btn-sm"
+                hx-get="{% url 'project_list' %}?page={{ page_obj.next_page_number }}&search={{ search|urlencode }}&status={{ status }}&type={{ type_id }}"
+                hx-target="#projects-table" hx-swap="outerHTML" hx-push-url="true">التالي</button>
+      {% else %}
+        <button class="btn join-item btn-sm btn-disabled">التالي</button>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

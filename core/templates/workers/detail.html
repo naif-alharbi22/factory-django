@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}{{ worker.name }} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+  <div class="flex items-start gap-3">
+    <a href="{% url 'worker_list' %}" class="btn btn-ghost btn-sm btn-circle mt-1">→</a>
+    <div class="flex items-center gap-3">
+      <div class="grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-lg font-bold text-primary">
+        {{ worker.name|initials }}
+      </div>
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="text-2xl font-bold">{{ worker.name }}</h1>
+          <span class="badge {% if worker.is_active %}badge-success{% else %}badge-ghost{% endif %}">
+            {% if worker.is_active %}نشط{% else %}موقوف{% endif %}
+          </span>
+        </div>
+        <p class="mt-1 text-sm opacity-60">{{ worker.position|default:"—" }}{% if worker.nationality %} · {{ worker.nationality }}{% endif %}</p>
+      </div>
+    </div>
+  </div>
+  {% if user.can_edit_data %}
+  <div class="flex flex-wrap gap-2">
+    <button class="btn btn-sm btn-outline" onclick="hours_modal.showModal()">تسجيل ساعات</button>
+    <a href="{% url 'worker_edit' worker.pk %}" class="btn btn-sm btn-primary">تعديل</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  {% include "partials/stat.html" with label="الراتب الأساسي" value=worker.base_salary|money0 unit="ريال" icon="💵" tone="primary" %}
+  {% include "partials/stat.html" with label="الراتب مع البدلات" value=worker.salary_with_allowances|money0 unit="ريال" icon="💰" tone="info" %}
+  {% include "partials/stat.html" with label="إجمالي الساعات" value=total_hours|hours unit="ساعة" icon="⏱️" tone="success" %}
+  {% include "partials/stat.html" with label="إجمالي التكلفة" value=total_cost|money unit="ريال" icon="📊" tone="warning" %}
+</div>
+
+<div class="grid gap-4 lg:grid-cols-3">
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">بيانات الموظف</h2>
+      <dl class="mt-2 space-y-2">
+        {% include "partials/kv.html" with k="الرقم الوظيفي" v=worker.employee_number nums=1 %}
+        {% include "partials/kv.html" with k="رقم الهوية" v=worker.id_number nums=1 %}
+        {% include "partials/kv.html" with k="الجنسية" v=worker.nationality %}
+        {% include "partials/kv.html" with k="الهاتف" v=worker.phone nums=1 %}
+        {% include "partials/kv.html" with k="تاريخ التعيين" v=worker.hire_date %}
+        {% include "partials/kv.html" with k="أجر الساعة" v=worker.hourly_rate|money nums=1 %}
+        {% include "partials/kv.html" with k="أجر الساعة الإضافية" v=worker.effective_overtime_rate|money nums=1 %}
+        {% include "partials/kv.html" with k="التأمين" v=worker.insurance_amount|money0 nums=1 %}
+      </dl>
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm lg:col-span-2">
+    <div class="card-body">
+      <h2 class="card-title text-base">
+        سجل ساعات العمل <span class="badge badge-sm badge-ghost nums">{{ hours|length }}</span>
+      </h2>
+      <div class="mt-2 max-h-[32rem] overflow-x-auto">
+        <table class="table table-sm table-pin-rows">
+          <thead>
+            <tr><th>التاريخ</th><th>المشروع</th><th class="text-left">عادية</th><th class="text-left">إضافية</th><th class="text-left">التكلفة</th>{% if user.can_edit_data %}<th></th>{% endif %}</tr>
+          </thead>
+          <tbody>
+            {% for row in hours %}
+            <tr class="hover">
+              <td class="nums">{{ row.date|date:"Y-m-d" }}</td>
+              <td>
+                {% if row.project %}
+                  <a href="{% url 'project_detail' row.project.pk %}" class="link link-hover">{{ row.project.name }}</a>
+                {% else %}<span class="opacity-50">بدون مشروع</span>{% endif %}
+              </td>
+              <td class="nums text-left">{{ row.regular_hours|hours }}</td>
+              <td class="nums text-left">{{ row.overtime_hours|hours }}</td>
+              <td class="nums text-left font-medium">{{ row.total_cost|money }}</td>
+              {% if user.can_edit_data %}
+              <td class="text-left">
+                <form method="post" action="{% url 'hours_delete' row.pk %}" onsubmit="return confirm('حذف سجل الساعات؟')">
+                  {% csrf_token %}
+                  <button class="btn btn-ghost btn-xs text-error">حذف</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">{% include "partials/empty.html" with title="لا توجد ساعات مسجلة" %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if user.can_edit_data %}
+<dialog id="hours_modal" class="modal">
+  <div class="modal-box">
+    <h3 class="text-lg font-bold">تسجيل ساعات — {{ worker.name }}</h3>
+    <form method="post" action="{% url 'hours_add' %}" class="mt-4 space-y-3">
+      {% csrf_token %}
+      {% include "partials/field.html" with field=hours_form.worker %}
+      {% include "partials/field.html" with field=hours_form.project %}
+      <div class="grid gap-3 sm:grid-cols-3">
+        {% include "partials/field.html" with field=hours_form.date %}
+        {% include "partials/field.html" with field=hours_form.regular_hours %}
+        {% include "partials/field.html" with field=hours_form.overtime_hours %}
+      </div>
+      {% include "partials/field.html" with field=hours_form.notes %}
+      <div class="modal-action">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="hours_modal.close()">إلغاء</button>
+        <button type="submit" class="btn btn-primary btn-sm">تسجيل</button>
+      </div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>إغلاق</button></form>
+</dialog>
+{% endif %}
+{% endblock %}

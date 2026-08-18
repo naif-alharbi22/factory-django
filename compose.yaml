@@ -1,0 +1,64 @@
+# نظام إدارة تكاليف المشاريع — التشغيل عبر Docker
+#
+#   1) cp .env.example .env   ثم ضع رابط Supabase في DATABASE_URL
+#   2) docker compose up -d --build
+#   3) لنقل بيانات النظام القديم مرة واحدة:
+#      docker compose --profile tools run --rm import
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: factory-projects:latest
+    container_name: factory-web
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-0}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
+      RUN_MIGRATIONS: "${RUN_MIGRATIONS:-1}"
+      TZ: "${TZ:-Asia/Riyadh}"
+      # يُستخدم فقط إذا لم يُضبط DATABASE_URL (وضع SQLite الاحتياطي)
+      SQLITE_PATH: /app/data/factory.sqlite3
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    volumes:
+      - media:/app/media
+      - sqlite-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/login/", "-o", "/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # خدمة لمرة واحدة: استيراد بيانات النظام القديم
+  # مهم: يُربط المجلد كاملاً وليس ملف .db وحده (ملفات -wal و -shm ضرورية)
+  import:
+    profiles: ["tools"]
+    image: factory-projects:latest
+    depends_on:
+      - web
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SQLITE_PATH: /app/data/factory.sqlite3
+      TZ: "${TZ:-Asia/Riyadh}"
+    volumes:
+      - sqlite-data:/app/data
+      - "${LEGACY_DIR:-../factory-projects/server}:/legacy:ro"
+    command:
+      - python
+      - manage.py
+      - import_legacy
+      - --source
+      - /legacy/factory_management.db
+      - --flush
+
+volumes:
+  media:
+  sqlite-data:

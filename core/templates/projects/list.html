@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}المشاريع — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">قائمة المشاريع</h1>
+    <p class="mt-1 text-sm opacity-60"><span class="nums">{{ total }}</span> مشروع</p>
+  </div>
+  {% if user.can_edit_data %}
+    <a href="{% url 'project_create' %}" class="btn btn-sm btn-primary">+ مشروع جديد</a>
+  {% endif %}
+</div>
+
+<!-- أدوات التصفية -->
+<div class="card mb-4 bg-base-100 shadow-sm">
+  <div class="card-body p-4">
+    <form hx-get="{% url 'project_list' %}" hx-target="#projects-table" hx-swap="outerHTML"
+          hx-trigger="submit, change from:select, keyup changed delay:400ms from:input[name=search]"
+          hx-push-url="true" hx-indicator="#list-loading"
+          class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <input type="search" name="search" value="{{ search }}" placeholder="بحث بالاسم أو العميل أو الكود"
+             class="input input-bordered input-sm w-full lg:col-span-2">
+      <select name="status" class="select select-bordered select-sm w-full">
+        <option value="ALL">كل الحالات</option>
+        {% for value, label in statuses %}
+          <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select name="type" class="select select-bordered select-sm w-full">
+        <option value="ALL">كل الأنواع</option>
+        {% for t in types %}
+          <option value="{{ t.pk }}" {% if type_id == t.pk|stringformat:"s" %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+<span id="list-loading" class="htmx-indicator loading loading-dots loading-md text-primary"></span>
+
+{% include "projects/_table.html" %}
+{% endblock %}

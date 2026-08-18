@@ -1,0 +1,238 @@
+{% load fmt %}<!-- تقرير المشروع — WeasyPrint -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>تقرير {{ project.name }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 12mm 16mm 12mm;
+    @bottom-center {
+      content: "صفحة " counter(page) " من " counter(pages);
+      font-family: "Noto Kufi Arabic";
+      font-size: 8pt;
+      color: #94a3b8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Noto Kufi Arabic", "Noto Naskh Arabic", sans-serif;
+    font-size: 9pt;
+    color: #1e293b;
+    margin: 0;
+    line-height: 1.6;
+  }
+  .header {
+    background: #1e40af;
+    color: #fff;
+    padding: 14px 16px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+  }
+  .header h1 { margin: 0 0 4px; font-size: 16pt; }
+  .header .meta { font-size: 8.5pt; opacity: .85; }
+  .header .badge {
+    display: inline-block; background: rgba(255,255,255,.2);
+    padding: 2px 10px; border-radius: 20px; font-size: 8pt; margin-top: 6px;
+  }
+
+  h2 {
+    font-size: 11pt; margin: 16px 0 8px; padding-bottom: 5px;
+    border-bottom: 2px solid #e2e8f0; color: #1e40af;
+  }
+
+  .cards { display: flex; gap: 8px; margin-bottom: 6px; }
+  .card {
+    flex: 1; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 9px 10px; background: #f8fafc;
+  }
+  .card .label { font-size: 7.5pt; color: #64748b; }
+  .card .value { font-size: 12pt; font-weight: bold; margin-top: 2px; direction: ltr; text-align: right; }
+
+  .bar-wrap { background: #e2e8f0; border-radius: 20px; height: 12px; overflow: hidden; margin: 6px 0; }
+  .bar { height: 100%; border-radius: 20px; }
+  .ok { background: #16a34a; } .warn { background: #eab308; } .over { background: #dc2626; }
+  .text-ok { color: #16a34a; } .text-warn { color: #ca8a04; } .text-over { color: #dc2626; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th {
+    background: #f1f5f9; font-size: 8pt; padding: 6px 7px;
+    text-align: right; border-bottom: 1.5px solid #cbd5e1; color: #475569;
+  }
+  td { padding: 5px 7px; font-size: 8pt; border-bottom: 1px solid #f1f5f9; }
+  tr:nth-child(even) td { background: #fafafa; }
+  tfoot td { font-weight: bold; background: #f1f5f9; border-top: 1.5px solid #cbd5e1; }
+  .num { direction: ltr; text-align: left; font-variant-numeric: tabular-nums; }
+
+  .info-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .info-item {
+    width: 32%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px;
+  }
+  .info-item .k { font-size: 7pt; color: #64748b; }
+  .info-item .v { font-size: 8.5pt; margin-top: 1px; }
+
+  .empty { color: #94a3b8; font-size: 8pt; padding: 10px; text-align: center; font-style: italic; }
+  .footer { margin-top: 18px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 7.5pt; color: #94a3b8; text-align: center; }
+  .avoid-break { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>{{ project.name }}</h1>
+  <div class="meta">
+    {% if project.code %}الكود: {{ project.code }} · {% endif %}
+    العميل: {{ project.client_name|default:"—" }}
+    {% if project.type %} · النوع: {{ project.type.name }}{% endif %}
+  </div>
+  <span class="badge">{{ project.status_label }}</span>
+</div>
+
+<div class="cards avoid-break">
+  <div class="card"><div class="label">الميزانية</div><div class="value">{{ cost.budget|money }}</div></div>
+  <div class="card"><div class="label">التكلفة الكلية</div><div class="value">{{ cost.total_cost|money }}</div></div>
+  <div class="card"><div class="label">المتبقي</div><div class="value">{{ cost.remaining|money }}</div></div>
+  <div class="card"><div class="label">الدفعات المستلمة</div><div class="value">{{ cost.payments_received|money }}</div></div>
+</div>
+
+<h2>استخدام الميزانية</h2>
+<div class="avoid-break">
+  <div style="display:flex; justify-content:space-between; font-size:8.5pt;">
+    <span class="{% if cost.status_class == 'error' %}text-over{% elif cost.status_class == 'warning' %}text-warn{% else %}text-ok{% endif %}">
+      {{ cost.budget_status }}
+    </span>
+    <span class="num"><strong>{{ cost.usage_percent|pct }}%</strong></span>
+  </div>
+  <div class="bar-wrap">
+    <div class="bar {% if cost.status_class == 'error' %}over{% elif cost.status_class == 'warning' %}warn{% else %}ok{% endif %}"
+         style="width: {{ cost.usage_capped }}%"></div>
+  </div>
+  <table>
+    <tr>
+      <th>تكلفة الموظفين</th><th>تكلفة الفواتير</th><th>المصروفات</th><th>الإجمالي</th>
+    </tr>
+    <tr>
+      <td class="num">{{ cost.workers_cost|money }}</td>
+      <td class="num">{{ cost.invoices_cost|money }}</td>
+      <td class="num">{{ cost.expenses_cost|money }}</td>
+      <td class="num"><strong>{{ cost.total_cost|money }}</strong></td>
+    </tr>
+  </table>
+</div>
+
+<h2>بيانات المشروع</h2>
+<div class="info-grid avoid-break">
+  <div class="info-item"><div class="k">العميل</div><div class="v">{{ project.client_name|default:"—" }}</div></div>
+  <div class="info-item"><div class="k">الهاتف</div><div class="v num">{{ project.client_phone|default:"—" }}</div></div>
+  <div class="info-item"><div class="k">البريد</div><div class="v">{{ project.client_email|default:"—" }}</div></div>
+  <div class="info-item"><div class="k">تاريخ البداية</div><div class="v num">{{ project.start_date|date:"Y-m-d"|default:"—" }}</div></div>
+  <div class="info-item"><div class="k">النهاية المتوقعة</div><div class="v num">{{ project.estimated_end_date|date:"Y-m-d"|default:"—" }}</div></div>
+  <div class="info-item"><div class="k">الحالة</div><div class="v">{{ project.status_label }}</div></div>
+</div>
+{% if project.address %}
+  <div class="info-item" style="width:100%; margin-top:6px;"><div class="k">العنوان</div><div class="v">{{ project.address }}</div></div>
+{% endif %}
+
+<h2>ساعات عمل الموظفين ({{ hours|length }})</h2>
+{% if hours %}
+<table>
+  <thead>
+    <tr><th>الموظف</th><th>التاريخ</th><th class="num">ساعات عادية</th><th class="num">ساعات إضافية</th><th class="num">التكلفة</th></tr>
+  </thead>
+  <tbody>
+    {% for row in hours %}
+    <tr>
+      <td>{{ row.worker.name }}</td>
+      <td class="num">{{ row.date|date:"Y-m-d" }}</td>
+      <td class="num">{{ row.regular_hours|hours }}</td>
+      <td class="num">{{ row.overtime_hours|hours }}</td>
+      <td class="num">{{ row.total_cost|money }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td colspan="4">إجمالي تكلفة الموظفين</td><td class="num">{{ cost.workers_cost|money }}</td></tr>
+  </tfoot>
+</table>
+{% else %}<div class="empty">لا توجد ساعات مسجلة</div>{% endif %}
+
+<h2>الفواتير ({{ invoices|length }})</h2>
+{% if invoices %}
+<table>
+  <thead>
+    <tr><th>رقم الفاتورة</th><th>البيان</th><th>تاريخ الإصدار</th><th class="num">الإجمالي</th><th class="num">المدفوع</th><th>الحالة</th></tr>
+  </thead>
+  <tbody>
+    {% for invoice in invoices %}
+    <tr>
+      <td class="num">{{ invoice.invoice_number|default:"—" }}</td>
+      <td>{{ invoice.title|default:"—" }}</td>
+      <td class="num">{{ invoice.issue_date|date:"Y-m-d" }}</td>
+      <td class="num">{{ invoice.total_amount|money }}</td>
+      <td class="num">{{ invoice.paid_amount|money }}</td>
+      <td>{{ invoice.get_status_display }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="3">الإجمالي</td>
+      <td class="num">{{ invoice_totals.total|money }}</td>
+      <td class="num">{{ invoice_totals.paid|money }}</td>
+      <td></td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}<div class="empty">لا توجد فواتير</div>{% endif %}
+
+<h2>دفعات المشروع ({{ payments|length }})</h2>
+{% if payments %}
+<table>
+  <thead>
+    <tr><th>التاريخ</th><th class="num">المبلغ</th><th>طريقة الدفع</th><th>رقم السند</th><th>البيان</th></tr>
+  </thead>
+  <tbody>
+    {% for payment in payments %}
+    <tr>
+      <td class="num">{{ payment.payment_date|date:"Y-m-d" }}</td>
+      <td class="num">{{ payment.amount|money }}</td>
+      <td>{{ payment.payment_method|default:"—" }}</td>
+      <td class="num">{{ payment.receipt_number|default:"—" }}</td>
+      <td>{{ payment.description|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td>الإجمالي</td><td class="num">{{ cost.payments_received|money }}</td><td colspan="3"></td></tr>
+  </tfoot>
+</table>
+{% else %}<div class="empty">لا توجد دفعات</div>{% endif %}
+
+{% if expenses %}
+<h2>المصروفات ({{ expenses|length }})</h2>
+<table>
+  <thead>
+    <tr><th>البيان</th><th>التاريخ</th><th>التصنيف</th><th class="num">المبلغ</th></tr>
+  </thead>
+  <tbody>
+    {% for expense in expenses %}
+    <tr>
+      <td>{{ expense.title }}</td>
+      <td class="num">{{ expense.expense_date|date:"Y-m-d" }}</td>
+      <td>{{ expense.category.name|default:"—" }}</td>
+      <td class="num">{{ expense.amount|money }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><td colspan="3">الإجمالي</td><td class="num">{{ cost.expenses_cost|money }}</td></tr>
+  </tfoot>
+</table>
+{% endif %}
+
+<div class="footer">
+  تم إنشاء التقرير بتاريخ {{ report_date|date:"Y-m-d" }} بواسطة {{ generated_by.full_name }} — نظام إدارة تكاليف المشاريع
+</div>
+
+</body>
+</html>

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'create' %}مشروع جديد{% else %}تعديل {{ project.name }}{% endif %} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-3xl">
+  <div class="mb-5 flex items-center gap-3">
+    <a href="{% if mode == 'edit' %}{% url 'project_detail' project.pk %}{% else %}{% url 'project_list' %}{% endif %}"
+       class="btn btn-ghost btn-sm btn-circle">→</a>
+    <h1 class="text-2xl font-bold">{% if mode == 'create' %}مشروع جديد{% else %}تعديل المشروع{% endif %}</h1>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">{% include "partials/field.html" with field=form.name %}</div>
+          {% include "partials/field.html" with field=form.code %}
+          {% include "partials/field.html" with field=form.budget %}
+          {% include "partials/field.html" with field=form.client_name %}
+          {% include "partials/field.html" with field=form.client_phone %}
+          {% include "partials/field.html" with field=form.client_email %}
+          {% include "partials/field.html" with field=form.type %}
+          {% include "partials/field.html" with field=form.status %}
+          {% include "partials/field.html" with field=form.start_date %}
+          {% include "partials/field.html" with field=form.estimated_end_date %}
+          <div class="sm:col-span-2">{% include "partials/field.html" with field=form.address %}</div>
+          <div class="sm:col-span-2">{% include "partials/field.html" with field=form.description %}</div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <a href="{% if mode == 'edit' %}{% url 'project_detail' project.pk %}{% else %}{% url 'project_list' %}{% endif %}"
+             class="btn btn-ghost btn-sm">إلغاء</a>
+          <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

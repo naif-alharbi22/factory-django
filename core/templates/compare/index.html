@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}مقارنة المشاريع — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h1 class="text-2xl font-bold">مقارنة المشاريع</h1>
+  <p class="mt-1 text-sm opacity-60">اختر مشروعين إلى عشرة مشاريع للمقارنة بين الميزانيات والتكاليف</p>
+</div>
+
+<div class="grid gap-4 lg:grid-cols-4">
+  <!-- اختيار المشاريع -->
+  <div class="card bg-base-100 shadow-sm lg:col-span-1">
+    <div class="card-body p-4">
+      <h2 class="card-title text-sm">اختيار المشاريع</h2>
+      <input type="search" name="q" value="{{ search }}" placeholder="بحث..."
+             class="input input-bordered input-sm w-full"
+             hx-get="{% url 'compare' %}" hx-target="#picker" hx-swap="outerHTML"
+             hx-trigger="keyup changed delay:350ms"
+             hx-include="[name='ids']">
+      {% include "compare/_picker.html" %}
+    </div>
+  </div>
+
+  <!-- النتائج -->
+  <div class="lg:col-span-3">
+    {% if selected %}
+      <div class="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {% include "partials/stat.html" with label="مجموع الميزانيات" value=totals.budget|money0 unit="ريال" icon="💰" tone="primary" %}
+        {% include "partials/stat.html" with label="مجموع التكاليف" value=totals.total_cost|money0 unit="ريال" icon="📊" tone="info" %}
+        {% include "partials/stat.html" with label="تكلفة الموظفين" value=totals.workers|money0 unit="ريال" icon="👷" tone="success" %}
+        {% include "partials/stat.html" with label="الدفعات المستلمة" value=totals.payments|money0 unit="ريال" icon="🏦" tone="warning" %}
+      </div>
+
+      <!-- مقارنة بصرية -->
+      <div class="card mb-4 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">الميزانية مقابل التكلفة</h2>
+          <div class="mt-3 space-y-4">
+            {% for project in selected %}
+            <div>
+              <div class="mb-1 flex items-center justify-between gap-2 text-xs">
+                <a href="{% url 'project_detail' project.pk %}" class="link link-hover truncate font-medium">{{ project.name }}</a>
+                <span class="badge badge-xs {{ project.cost.status_class|default:'ghost' }}">{{ project.cost.usage_percent|pct }}%</span>
+              </div>
+              <div class="space-y-1">
+                <div class="flex items-center gap-2">
+                  <span class="w-16 shrink-0 text-[10px] opacity-60">ميزانية</span>
+                  <div class="h-3 flex-1 overflow-hidden rounded-full bg-base-300">
+                    <div class="h-full rounded-full bg-primary/70" style="width: {{ project.cost.budget|bar_width:scale }}%"></div>
+                  </div>
+                  <span class="nums w-24 shrink-0 text-left text-[11px]">{{ project.cost.budget|money0 }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="w-16 shrink-0 text-[10px] opacity-60">تكلفة</span>
+                  <div class="h-3 flex-1 overflow-hidden rounded-full bg-base-300">
+                    <div class="h-full rounded-full bg-{{ project.cost.status_class }}" style="width: {{ project.cost.total_cost|bar_width:scale }}%"></div>
+                  </div>
+                  <span class="nums w-24 shrink-0 text-left text-[11px]">{{ project.cost.total_cost|money0 }}</span>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <!-- جدول تفصيلي -->
+      <div class="card bg-base-100 shadow-sm">
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>المشروع</th><th>الحالة</th>
+                <th class="text-left">الميزانية</th><th class="text-left">الموظفون</th>
+                <th class="text-left">الفواتير</th><th class="text-left">المصروفات</th>
+                <th class="text-left">التكلفة</th><th class="text-left">المتبقي</th>
+                <th class="text-left">الاستخدام</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for project in selected %}
+              <tr class="hover">
+                <td>
+                  <a href="{% url 'project_detail' project.pk %}" class="link link-hover font-medium">{{ project.name }}</a>
+                </td>
+                <td><span class="badge badge-xs {{ project.status|status_badge }}">{{ project.status_label }}</span></td>
+                <td class="nums text-left">{{ project.cost.budget|money0 }}</td>
+                <td class="nums text-left">{{ project.cost.workers_cost|money }}</td>
+                <td class="nums text-left">{{ project.cost.invoices_cost|money }}</td>
+                <td class="nums text-left">{{ project.cost.expenses_cost|money }}</td>
+                <td class="nums text-left font-bold">{{ project.cost.total_cost|money }}</td>
+                <td class="nums text-left {% if project.cost.remaining < 0 %}text-error font-medium{% endif %}">{{ project.cost.remaining|money }}</td>
+                <td class="text-left">
+                  <span class="badge badge-sm badge-{{ project.cost.status_class }}">{{ project.cost.usage_percent|pct }}%</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+            {% if totals %}
+            <tfoot>
+              <tr class="bg-base-200/60 font-bold">
+                <td colspan="2">الإجمالي</td>
+                <td class="nums text-left">{{ totals.budget|money0 }}</td>
+                <td class="nums text-left">{{ totals.workers|money }}</td>
+                <td class="nums text-left">{{ totals.invoices|money }}</td>
+                <td></td>
+                <td class="nums text-left">{{ totals.total_cost|money }}</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+            {% endif %}
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body">
+          {% include "partials/empty.html" with title="اختر مشروعين على الأقل" hint="حدّد المشاريع من القائمة على اليمين ثم اضغط «قارن»" %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

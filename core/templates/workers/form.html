@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'create' %}موظف جديد{% else %}تعديل {{ worker.name }}{% endif %} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl">
+  <div class="mb-5 flex items-center gap-3">
+    <a href="{% if mode == 'edit' %}{% url 'worker_detail' worker.pk %}{% else %}{% url 'worker_list' %}{% endif %}"
+       class="btn btn-ghost btn-sm btn-circle">→</a>
+    <h1 class="text-2xl font-bold">{% if mode == 'create' %}إضافة موظف جديد{% else %}تعديل بيانات الموظف{% endif %}</h1>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">{% include "partials/field.html" with field=form.name %}</div>
+          {% include "partials/field.html" with field=form.employee_number %}
+          {% include "partials/field.html" with field=form.id_number %}
+          {% include "partials/field.html" with field=form.nationality %}
+          {% include "partials/field.html" with field=form.phone %}
+          {% include "partials/field.html" with field=form.position %}
+          {% include "partials/field.html" with field=form.hire_date %}
+        </div>
+
+        <div class="divider text-xs opacity-60">الأجور</div>
+        <div class="alert alert-info py-2">
+          <span class="text-xs">
+            عند إدخال الراتب الأساسي تُحسب الأجور تلقائياً:
+            أجر الساعة = (الراتب + 1000) ÷ 26 ÷ 8 · الإضافي = الراتب ÷ 30 ÷ 9 × 1.5 — ويمكن تعديلها يدوياً.
+          </span>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          {% include "partials/field.html" with field=form.base_salary %}
+          {% include "partials/field.html" with field=form.insurance_amount %}
+          {% include "partials/field.html" with field=form.hourly_rate %}
+          {% include "partials/field.html" with field=form.overtime_rate %}
+        </div>
+
+        <label class="label cursor-pointer justify-start gap-3">
+          {{ form.is_active }}
+          <span class="label-text text-sm">{{ form.is_active.label }}</span>
+        </label>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <a href="{% if mode == 'edit' %}{% url 'worker_detail' worker.pk %}{% else %}{% url 'worker_list' %}{% endif %}"
+             class="btn btn-ghost btn-sm">إلغاء</a>
+          <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // حساب الأجور تلقائياً من الراتب الأساسي (نفس معادلة النظام السابق)
+  (function () {
+    const salary = document.querySelector('[data-rate="salary"]');
+    const hourly = document.querySelector('[data-rate="hourly"]');
+    const overtime = document.querySelector('[data-rate="overtime"]');
+    if (!salary || !hourly || !overtime) return;
+
+    salary.addEventListener("input", function () {
+      const value = parseFloat(salary.value);
+      if (!Number.isFinite(value) || value <= 0) return;
+      // لا نستبدل قيمة أدخلها المستخدم يدوياً إلا إذا كانت فارغة أو محسوبة سابقاً
+      if (hourly.dataset.touched !== "1") {
+        hourly.value = ((value + 1000) / 26 / 8).toFixed(4);
+      }
+      if (overtime.dataset.touched !== "1") {
+        overtime.value = (value / 30 / 9 * 1.5).toFixed(4);
+      }
+    });
+    [hourly, overtime].forEach(el =>
+      el.addEventListener("input", () => { el.dataset.touched = "1"; })
+    );
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,90 @@
+@import "tailwindcss";
+@source "../core/templates/**/*.html";
+@plugin "daisyui" {
+  themes: factory --default, factorydark --prefersdark;
+}
+
+/* ===== هوية النظام: أزرق مؤسسي مع تحديث عصري ===== */
+@plugin "daisyui/theme" {
+  name: "factory";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(97% 0.005 250);
+  --color-base-300: oklch(93% 0.01 250);
+  --color-base-content: oklch(28% 0.03 255);
+  --color-primary: oklch(48% 0.16 259);
+  --color-primary-content: oklch(98% 0.01 259);
+  --color-secondary: oklch(58% 0.12 250);
+  --color-secondary-content: oklch(98% 0.01 250);
+  --color-accent: oklch(62% 0.14 195);
+  --color-accent-content: oklch(98% 0.01 195);
+  --color-neutral: oklch(32% 0.03 255);
+  --color-neutral-content: oklch(97% 0.01 255);
+  --color-info: oklch(62% 0.13 240);
+  --color-info-content: oklch(99% 0.01 240);
+  --color-success: oklch(60% 0.14 155);
+  --color-success-content: oklch(99% 0.01 155);
+  --color-warning: oklch(75% 0.16 75);
+  --color-warning-content: oklch(26% 0.05 75);
+  --color-error: oklch(58% 0.20 25);
+  --color-error-content: oklch(99% 0.01 25);
+  --radius-selector: 0.75rem;
+  --radius-field: 0.625rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "factorydark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: oklch(21% 0.02 258);
+  --color-base-200: oklch(18% 0.02 258);
+  --color-base-300: oklch(15% 0.02 258);
+  --color-base-content: oklch(92% 0.01 258);
+  --color-primary: oklch(66% 0.15 258);
+  --color-primary-content: oklch(15% 0.03 258);
+  --color-secondary: oklch(62% 0.11 250);
+  --color-secondary-content: oklch(15% 0.02 250);
+  --color-accent: oklch(70% 0.13 195);
+  --color-accent-content: oklch(15% 0.02 195);
+  --color-neutral: oklch(28% 0.02 258);
+  --color-neutral-content: oklch(92% 0.01 258);
+  --color-info: oklch(70% 0.12 240);
+  --color-info-content: oklch(15% 0.02 240);
+  --color-success: oklch(68% 0.13 155);
+  --color-success-content: oklch(15% 0.02 155);
+  --color-warning: oklch(78% 0.15 75);
+  --color-warning-content: oklch(18% 0.03 75);
+  --color-error: oklch(66% 0.18 25);
+  --color-error-content: oklch(15% 0.02 25);
+  --radius-selector: 0.75rem;
+  --radius-field: 0.625rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* ===== الخطوط العربية ===== */
+@theme {
+  --font-sans: "Noto Kufi Arabic", "Cairo", "Segoe UI", system-ui, sans-serif;
+}
+
+body { font-family: var(--font-sans); }
+
+/* أرقام إنجليزية داخل الجداول المالية لسهولة القراءة */
+.nums { font-variant-numeric: tabular-nums; direction: ltr; display: inline-block; }
+
+/* مؤشر تحميل HTMX */
+.htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { opacity: 1; }
