@@ -45,6 +45,22 @@ PERMISSION_MODULES = [
         ("edit_invoice", "تعديل فاتورة"),
         ("delete_invoice", "حذف فاتورة"),
     ]),
+    ("التصنيع", [
+        ("view_manufacturing", "عرض متابعة التصنيع"),
+        ("add_manufacturing", "إنشاء متابعة تصنيع لمشروع"),
+        ("update_manufacturing_stage", "تحديث حالة خطوة تصنيع"),
+        ("add_manufacturing_note", "إضافة ملاحظات على خطوات التصنيع"),
+    ]),
+    ("إعدادات التصنيع", [
+        ("view_manufacturing_config", "عرض إعدادات مراحل التصنيع"),
+        ("add_manufacturing_phase", "إضافة مرحلة تصنيع"),
+        ("edit_manufacturing_phase", "تعديل مرحلة تصنيع"),
+        ("delete_manufacturing_phase", "حذف أو إيقاف مرحلة تصنيع"),
+        ("add_manufacturing_stage", "إضافة خطوة تصنيع"),
+        ("edit_manufacturing_stage", "تعديل خطوة تصنيع"),
+        ("delete_manufacturing_stage", "حذف أو إيقاف خطوة تصنيع"),
+        ("reorder_manufacturing", "إعادة ترتيب مراحل وخطوات التصنيع"),
+    ]),
     ("المقارنة", [
         ("view_compare", "مقارنة المشاريع"),
     ]),
@@ -68,7 +84,8 @@ PERMISSION_MODULES = [
 ALL_PERMISSIONS = [perm for _, perms in PERMISSION_MODULES for perm in perms]
 ALL_CODENAMES = [codename for codename, _ in ALL_PERMISSIONS]
 
-_ADMIN_MODULES = ("المستخدمون", "المجموعات")
+# أقسام لا تُمنح افتراضياً لغير المديرين (إدارة النظام وتهيئة سير العمل)
+_ADMIN_MODULES = ("المستخدمون", "المجموعات", "إعدادات التصنيع")
 # المجموعات الافتراضية وصلاحياتها
 DEFAULT_GROUPS = {
     "مدير": ALL_CODENAMES,
@@ -89,7 +106,9 @@ def home_route(user):
         ("view_projects", "project_list"),
         ("view_workers", "worker_list"),
         ("view_invoices", "invoice_list"),
+        ("view_manufacturing", "manufacturing_list"),
         ("view_compare", "compare"),
+        ("view_manufacturing_config", "workflow_settings"),
         ("view_users", "user_list"),
         ("view_groups", "group_list"),
     ):

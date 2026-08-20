@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}إعدادات مراحل التصنيع — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">إعدادات مراحل التصنيع</h1>
+    <p class="mt-1 text-sm opacity-60">
+      سير العمل يُحسب من ترتيب المراحل والخطوات — التعديل هنا يسري على المتابعات الجديدة دون المساس بالسجلات التاريخية
+    </p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if perms.core.view_manufacturing %}
+      <a href="{% url 'manufacturing_list' %}" class="btn btn-sm btn-outline">متابعة التصنيع</a>
+    {% endif %}
+    {% if perms.core.add_manufacturing_phase %}
+      <a href="{% url 'phase_create' %}" class="btn btn-sm btn-primary">+ مرحلة جديدة</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="space-y-4">
+  {% for phase in phases %}
+  <div class="card bg-base-100 shadow-sm {% if not phase.is_active %}opacity-70{% endif %}">
+    <div class="card-body">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="card-title text-base">
+          <span class="badge badge-sm badge-primary nums">{{ phase.order }}</span>
+          {{ phase.name }}
+          {% if not phase.is_active %}<span class="badge badge-sm badge-ghost">موقوفة</span>{% endif %}
+        </h2>
+        <div class="flex flex-wrap items-center gap-1">
+          {% if perms.core.reorder_manufacturing %}
+            <form method="post" action="{% url 'phase_move' phase.pk %}">{% csrf_token %}
+              <input type="hidden" name="direction" value="up">
+              <button class="btn btn-ghost btn-xs" {% if forloop.first %}disabled{% endif %} title="أعلى">↑</button>
+            </form>
+            <form method="post" action="{% url 'phase_move' phase.pk %}">{% csrf_token %}
+              <input type="hidden" name="direction" value="down">
+              <button class="btn btn-ghost btn-xs" {% if forloop.last %}disabled{% endif %} title="أسفل">↓</button>
+            </form>
+          {% endif %}
+          {% if perms.core.add_manufacturing_stage %}
+            <a href="{% url 'stage_create' %}?phase={{ phase.pk }}" class="btn btn-ghost btn-xs">+ خطوة</a>
+          {% endif %}
+          {% if perms.core.edit_manufacturing_phase %}
+            <a href="{% url 'phase_edit' phase.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+          {% endif %}
+          {% if perms.core.delete_manufacturing_phase %}
+            <form method="post" action="{% url 'phase_toggle' phase.pk %}">{% csrf_token %}
+              <button class="btn btn-ghost btn-xs">{% if phase.is_active %}إيقاف{% else %}تفعيل{% endif %}</button>
+            </form>
+            <form method="post" action="{% url 'phase_delete' phase.pk %}"
+                  onsubmit="return confirm('حذف المرحلة {{ phase.name }}؟')">
+              {% csrf_token %}
+              <button class="btn btn-ghost btn-xs text-error"
+                      {% if phase.in_use %}disabled title="لها سجلات تصنيع — أوقفها بدلاً من الحذف"{% endif %}>حذف</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+      {% if phase.description %}<p class="text-xs opacity-60">{{ phase.description }}</p>{% endif %}
+
+      <div class="mt-2 overflow-x-auto">
+        <table class="table table-xs">
+          <thead>
+            <tr><th class="w-10">#</th><th>الخطوة</th><th>الوصف</th><th>الحالة</th><th>الاستخدام</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for stage in phase.stages.all %}
+            <tr class="hover {% if not stage.is_active %}opacity-60{% endif %}">
+              <td class="nums">{{ stage.order }}</td>
+              <td class="font-medium">{{ stage.name }}</td>
+              <td class="max-w-60 truncate text-xs opacity-70">{{ stage.description|default:"—" }}</td>
+              <td>
+                <span class="badge badge-xs {% if stage.is_active %}badge-success{% else %}badge-ghost{% endif %}">
+                  {% if stage.is_active %}نشطة{% else %}موقوفة{% endif %}
+                </span>
+              </td>
+              <td class="nums text-xs opacity-60">{{ stage.usage }} سجل</td>
+              <td class="text-left">
+                <div class="flex justify-end gap-1">
+                  {% if perms.core.reorder_manufacturing %}
+                    <form method="post" action="{% url 'stage_move' stage.pk %}">{% csrf_token %}
+                      <input type="hidden" name="direction" value="up">
+                      <button class="btn btn-ghost btn-xs" {% if forloop.first %}disabled{% endif %} title="أعلى">↑</button>
+                    </form>
+                    <form method="post" action="{% url 'stage_move' stage.pk %}">{% csrf_token %}
+                      <input type="hidden" name="direction" value="down">
+                      <button class="btn btn-ghost btn-xs" {% if forloop.last %}disabled{% endif %} title="أسفل">↓</button>
+                    </form>
+                  {% endif %}
+                  {% if perms.core.edit_manufacturing_stage %}
+                    <a href="{% url 'stage_edit' stage.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+                  {% endif %}
+                  {% if perms.core.delete_manufacturing_stage %}
+                    <form method="post" action="{% url 'stage_toggle' stage.pk %}">{% csrf_token %}
+                      <button class="btn btn-ghost btn-xs">{% if stage.is_active %}إيقاف{% else %}تفعيل{% endif %}</button>
+                    </form>
+                    <form method="post" action="{% url 'stage_delete' stage.pk %}"
+                          onsubmit="return confirm('حذف الخطوة {{ stage.name }}؟')">
+                      {% csrf_token %}
+                      <button class="btn btn-ghost btn-xs text-error"
+                              {% if stage.usage %}disabled title="لها سجلات تصنيع — أوقفها بدلاً من الحذف"{% endif %}>حذف</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-center text-xs opacity-50 py-3">لا توجد خطوات في هذه المرحلة</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  {% include "partials/empty.html" with title="لا توجد مراحل — أضف أول مرحلة" %}
+  {% endfor %}
+</div>
+{% endblock %}

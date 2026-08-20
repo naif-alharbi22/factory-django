@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'create' %}مرحلة جديدة{% else %}تعديل مرحلة{% endif %} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-lg">
+  <div class="mb-5 flex items-center gap-3">
+    <a href="{% url 'workflow_settings' %}" class="btn btn-ghost btn-sm btn-circle">→</a>
+    <h1 class="text-2xl font-bold">
+      {% if mode == 'create' %}إضافة مرحلة تصنيع{% else %}تعديل {{ phase.name }}{% endif %}
+    </h1>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-3">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+        {% include "partials/field.html" with field=form.name %}
+        {% include "partials/field.html" with field=form.description %}
+        {% if mode == 'edit' %}
+          <p class="text-xs opacity-60">إعادة تسمية المرحلة تنعكس تلقائياً على كل سجلات التصنيع المرتبطة بها</p>
+        {% endif %}
+        <div class="flex justify-end gap-2 pt-2">
+          <a href="{% url 'workflow_settings' %}" class="btn btn-ghost btn-sm">إلغاء</a>
+          <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

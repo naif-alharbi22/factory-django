@@ -7,7 +7,8 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
 
 from .models import (
-    Expense, Invoice, Project, ProjectPayment, User, Worker, WorkHour,
+    Expense, Invoice, ManufacturingPhase, ManufacturingStage,
+    Project, ProjectPayment, User, Worker, WorkHour,
 )
 from .permissions import ALL_CODENAMES, ALL_PERMISSIONS
 
@@ -288,3 +289,55 @@ class GroupForm(StyledModelForm):
                 )
             )
         return group
+
+
+class ManufacturingCreateForm(forms.Form):
+    """إنشاء متابعة تصنيع — المشاريع التي لا متابعة لها فقط."""
+
+    project = forms.ModelChoiceField(
+        label="المشروع",
+        queryset=Project.objects.filter(manufacturing__isnull=True).order_by("-id"),
+        widget=forms.Select(attrs={"class": BASE_SELECT}),
+    )
+
+
+class ManufacturingPhaseForm(StyledModelForm):
+    class Meta:
+        model = ManufacturingPhase
+        fields = ["name", "description"]
+
+    def save(self, commit=True):
+        phase = super().save(commit=False)
+        if phase.pk is None:
+            last = ManufacturingPhase.objects.order_by("-order").first()
+            phase.order = (last.order if last else 0) + 1
+        if commit:
+            phase.save()
+        return phase
+
+
+class ManufacturingStageForm(StyledModelForm):
+    """خطوة تصنيع — تغيير حقل المرحلة ينقل الخطوة بين المراحل بأمان
+    (سجلات التصنيع التاريخية تبقى مرتبطة بالخطوة نفسها)."""
+
+    class Meta:
+        model = ManufacturingStage
+        fields = ["phase", "name", "description"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["phase"].queryset = ManufacturingPhase.objects.order_by("order", "id")
+        self.fields["phase"].empty_label = None
+
+    def save(self, commit=True):
+        stage = super().save(commit=False)
+        moved = "phase" in self.changed_data
+        if stage.pk is None or moved:
+            last = (
+                ManufacturingStage.objects.filter(phase=stage.phase)
+                .exclude(pk=stage.pk).order_by("-order").first()
+            )
+            stage.order = (last.order if last else 0) + 1
+        if commit:
+            stage.save()
+        return stage

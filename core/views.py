@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum, Value
+from django.db.models import Count, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
@@ -17,12 +17,15 @@ from django.views.decorators.http import require_POST
 from django.contrib.auth.models import Group
 
 from .forms import (
-    ExpenseForm, GroupForm, InvoiceForm, LoginForm, ProjectForm,
+    ExpenseForm, GroupForm, InvoiceForm, LoginForm, ManufacturingCreateForm,
+    ManufacturingPhaseForm, ManufacturingStageForm, ProjectForm,
     ProjectPaymentForm, UserCreateForm, UserEditForm, WorkerForm, WorkHourForm,
 )
 from .models import (
-    Expense, ExpenseCategory, Invoice, InvoiceStatus, Project, ProjectPayment,
-    ProjectStatus, ProjectType, User, Worker, WorkHour,
+    Expense, ExpenseCategory, Invoice, InvoiceStatus, Manufacturing,
+    ManufacturingPhase, ManufacturingStage, ManufacturingStageRecord, Project,
+    ProjectPayment, ProjectStatus, ProjectType, StageStatus, User, Worker,
+    WorkHour,
 )
 from .permissions import PERMISSION_MODULES, home_route, require_perm
 from .services import (
@@ -648,3 +651,283 @@ def group_delete(request, pk):
         group.delete()
         messages.success(request, f"تم حذف المجموعة: {name}")
     return redirect("group_list")
+
+
+# ===================== التصنيع =====================
+@login_required
+@require_perm("view_manufacturing")
+def manufacturing_list(request):
+    items = list(
+        Manufacturing.objects.select_related("project").order_by("-id")
+    )
+    return render(request, "manufacturing/list.html", {
+        "items": items,
+        "create_form": ManufacturingCreateForm(),
+    })
+
+
+@login_required
+@require_perm("add_manufacturing")
+@require_POST
+def manufacturing_create(request):
+    form = ManufacturingCreateForm(request.POST)
+    if form.is_valid():
+        try:
+            manufacturing = Manufacturing.create_for_project(form.cleaned_data["project"])
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect("manufacturing_list")
+        messages.success(request, f"تم إنشاء متابعة التصنيع: {manufacturing.project.name}")
+        return redirect("manufacturing_detail", pk=manufacturing.pk)
+    messages.error(request, "اختر مشروعاً بلا متابعة تصنيع")
+    return redirect("manufacturing_list")
+
+
+@login_required
+@require_perm("view_manufacturing")
+def manufacturing_detail(request, pk):
+    manufacturing = get_object_or_404(
+        Manufacturing.objects.select_related("project"), pk=pk
+    )
+    return render(request, "manufacturing/detail.html", {
+        "manufacturing": manufacturing,
+        "groups": manufacturing.phases_with_records(),
+        "StageStatus": StageStatus,
+    })
+
+
+@login_required
+@require_perm("update_manufacturing_stage")
+@require_POST
+def manufacturing_record_status(request, pk):
+    record = get_object_or_404(
+        ManufacturingStageRecord.objects.select_related(
+            "manufacturing", "stage", "stage__phase"
+        ),
+        pk=pk,
+    )
+    action = request.POST.get("action")
+
+    if not record.is_active_step:
+        messages.error(request, "هذه الخطوة موقوفة في التهيئة الحالية")
+    elif record.status == StageStatus.DONE:
+        messages.warning(request, f"الخطوة «{record.stage.name}» مكتملة أصلاً")
+    elif record.blocked_by is not None:
+        messages.error(
+            request,
+            f"لا يمكن التقدم — أكمل الخطوة «{record.blocked_by.stage.name}» أولاً",
+        )
+    elif action == "start" and record.status == StageStatus.NOT_STARTED:
+        record.status = StageStatus.IN_PROGRESS
+        record.started_at = timezone.now()
+        record.save(update_fields=["status", "started_at", "updated_at"])
+        messages.success(request, f"بدأت الخطوة: {record.stage.name}")
+    elif action == "complete":
+        record.status = StageStatus.DONE
+        record.started_at = record.started_at or timezone.now()
+        record.completed_at = timezone.now()
+        record.save(update_fields=["status", "started_at", "completed_at", "updated_at"])
+        messages.success(request, f"اكتملت الخطوة: {record.stage.name}")
+    else:
+        messages.error(request, "إجراء غير صالح")
+    return redirect("manufacturing_detail", pk=record.manufacturing_id)
+
+
+@login_required
+@require_perm("add_manufacturing_note")
+@require_POST
+def manufacturing_record_note(request, pk):
+    record = get_object_or_404(
+        ManufacturingStageRecord.objects.select_related("stage"), pk=pk
+    )
+    record.notes = request.POST.get("notes", "").strip() or None
+    record.save(update_fields=["notes", "updated_at"])
+    messages.success(request, f"حُفظت ملاحظات الخطوة: {record.stage.name}")
+    return redirect("manufacturing_detail", pk=record.manufacturing_id)
+
+
+# ===================== إعدادات مراحل التصنيع =====================
+def _renumber(siblings, moving=None, direction=None):
+    """يعيد ترقيم القائمة تسلسلياً، وينقل عنصراً خطوة واحدة إن طُلب."""
+    items = list(siblings)
+    if moving is not None:
+        index = next(i for i, item in enumerate(items) if item.pk == moving.pk)
+        target = index - 1 if direction == "up" else index + 1
+        if 0 <= target < len(items):
+            items.insert(target, items.pop(index))
+    for position, item in enumerate(items, start=1):
+        if item.order != position:
+            item.order = position
+            item.save(update_fields=["order", "updated_at"])
+
+
+@login_required
+@require_perm("view_manufacturing_config")
+def workflow_settings(request):
+    phases = list(
+        ManufacturingPhase.objects.order_by("order", "id").prefetch_related(
+            Prefetch(
+                "stages",
+                queryset=ManufacturingStage.objects.annotate(
+                    usage=Count("records")
+                ).order_by("order", "id"),
+            )
+        )
+    )
+    for phase in phases:
+        phase.in_use = any(stage.usage for stage in phase.stages.all())
+    return render(request, "manufacturing/settings.html", {"phases": phases})
+
+
+@login_required
+@require_perm("add_manufacturing_phase")
+def phase_create(request):
+    form = ManufacturingPhaseForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        phase = form.save()
+        messages.success(request, f"تمت إضافة المرحلة: {phase.name}")
+        return redirect("workflow_settings")
+    return render(request, "manufacturing/phase_form.html", {"form": form, "mode": "create"})
+
+
+@login_required
+@require_perm("edit_manufacturing_phase")
+def phase_edit(request, pk):
+    phase = get_object_or_404(ManufacturingPhase, pk=pk)
+    form = ManufacturingPhaseForm(request.POST or None, instance=phase)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"تم حفظ المرحلة: {phase.name}")
+        return redirect("workflow_settings")
+    return render(request, "manufacturing/phase_form.html", {
+        "form": form, "mode": "edit", "phase": phase,
+    })
+
+
+@login_required
+@require_perm("delete_manufacturing_phase")
+@require_POST
+def phase_toggle(request, pk):
+    phase = get_object_or_404(ManufacturingPhase, pk=pk)
+    phase.is_active = not phase.is_active
+    phase.save(update_fields=["is_active", "updated_at"])
+    messages.success(
+        request,
+        f"المرحلة «{phase.name}»: {'مفعّلة' if phase.is_active else 'موقوفة'}",
+    )
+    return redirect("workflow_settings")
+
+
+@login_required
+@require_perm("delete_manufacturing_phase")
+@require_POST
+def phase_delete(request, pk):
+    phase = get_object_or_404(ManufacturingPhase, pk=pk)
+    if ManufacturingStageRecord.objects.filter(stage__phase=phase).exists():
+        messages.error(
+            request,
+            f"لا يمكن حذف «{phase.name}» — لها سجلات تصنيع تاريخية، أوقفها بدلاً من الحذف",
+        )
+    else:
+        name = phase.name
+        phase.delete()
+        _renumber(ManufacturingPhase.objects.order_by("order", "id"))
+        messages.success(request, f"حُذفت المرحلة: {name}")
+    return redirect("workflow_settings")
+
+
+@login_required
+@require_perm("reorder_manufacturing")
+@require_POST
+def phase_move(request, pk):
+    phase = get_object_or_404(ManufacturingPhase, pk=pk)
+    direction = request.POST.get("direction")
+    if direction in ("up", "down"):
+        _renumber(ManufacturingPhase.objects.order_by("order", "id"), phase, direction)
+    return redirect("workflow_settings")
+
+
+@login_required
+@require_perm("add_manufacturing_stage")
+def stage_create(request):
+    initial = {}
+    phase_id = request.GET.get("phase")
+    if phase_id:
+        initial["phase"] = phase_id
+    form = ManufacturingStageForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        stage = form.save()
+        messages.success(request, f"تمت إضافة الخطوة: {stage.name}")
+        return redirect("workflow_settings")
+    return render(request, "manufacturing/stage_form.html", {"form": form, "mode": "create"})
+
+
+@login_required
+@require_perm("edit_manufacturing_stage")
+def stage_edit(request, pk):
+    stage = get_object_or_404(ManufacturingStage, pk=pk)
+    old_phase_id = stage.phase_id
+    form = ManufacturingStageForm(request.POST or None, instance=stage)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        if stage.phase_id != old_phase_id:
+            # إعادة ترقيم المرحلة الأصلية بعد نقل الخطوة منها
+            _renumber(
+                ManufacturingStage.objects.filter(phase_id=old_phase_id)
+                .order_by("order", "id")
+            )
+        messages.success(request, f"تم حفظ الخطوة: {stage.name}")
+        return redirect("workflow_settings")
+    return render(request, "manufacturing/stage_form.html", {
+        "form": form, "mode": "edit", "stage": stage,
+    })
+
+
+@login_required
+@require_perm("delete_manufacturing_stage")
+@require_POST
+def stage_toggle(request, pk):
+    stage = get_object_or_404(ManufacturingStage, pk=pk)
+    stage.is_active = not stage.is_active
+    stage.save(update_fields=["is_active", "updated_at"])
+    messages.success(
+        request,
+        f"الخطوة «{stage.name}»: {'مفعّلة' if stage.is_active else 'موقوفة'}",
+    )
+    return redirect("workflow_settings")
+
+
+@login_required
+@require_perm("delete_manufacturing_stage")
+@require_POST
+def stage_delete(request, pk):
+    stage = get_object_or_404(ManufacturingStage, pk=pk)
+    if stage.records.exists():
+        messages.error(
+            request,
+            f"لا يمكن حذف «{stage.name}» — لها سجلات تصنيع تاريخية، أوقفها بدلاً من الحذف",
+        )
+    else:
+        name = stage.name
+        phase_id = stage.phase_id
+        stage.delete()
+        _renumber(
+            ManufacturingStage.objects.filter(phase_id=phase_id).order_by("order", "id")
+        )
+        messages.success(request, f"حُذفت الخطوة: {name}")
+    return redirect("workflow_settings")
+
+
+@login_required
+@require_perm("reorder_manufacturing")
+@require_POST
+def stage_move(request, pk):
+    stage = get_object_or_404(ManufacturingStage, pk=pk)
+    direction = request.POST.get("direction")
+    if direction in ("up", "down"):
+        _renumber(
+            ManufacturingStage.objects.filter(phase_id=stage.phase_id)
+            .order_by("order", "id"),
+            stage, direction,
+        )
+    return redirect("workflow_settings")

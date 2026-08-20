@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}التصنيع — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">متابعة التصنيع</h1>
+    <p class="mt-1 text-sm opacity-60"><span class="nums">{{ items|length }}</span> مشروع تحت المتابعة</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if perms.core.view_manufacturing_config %}
+      <a href="{% url 'workflow_settings' %}" class="btn btn-sm btn-outline">إعدادات مراحل التصنيع</a>
+    {% endif %}
+    {% if perms.core.add_manufacturing %}
+      <button class="btn btn-sm btn-primary" onclick="mfg_modal.showModal()">+ متابعة تصنيع</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card bg-base-100 shadow-sm">
+  <div class="overflow-x-auto">
+    <table class="table table-sm">
+      <thead>
+        <tr><th>المشروع</th><th>الخطوة الحالية</th><th class="w-52">التقدم</th><th>آخر تحديث</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for m in items %}
+        <tr class="hover">
+          <td>
+            <a href="{% url 'project_detail' m.project.pk %}" class="link link-hover font-medium">{{ m.project.name }}</a>
+            {% if m.project.code %}<div class="text-[11px] opacity-50 nums">{{ m.project.code }}</div>{% endif %}
+          </td>
+          <td>
+            {% if m.is_complete %}
+              <span class="badge badge-sm badge-success">مكتمل ✓</span>
+            {% elif m.current_record %}
+              <span class="badge badge-sm badge-info">{{ m.current_record.stage.name }}</span>
+            {% else %}
+              <span class="badge badge-sm badge-ghost">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex items-center gap-2">
+              <progress class="progress {% if m.is_complete %}progress-success{% else %}progress-primary{% endif %} w-28"
+                        value="{{ m.progress_percent }}" max="100"></progress>
+              <span class="nums text-xs opacity-70">{{ m.progress_percent }}%</span>
+            </div>
+          </td>
+          <td class="nums text-xs opacity-60">{{ m.updated_at|date:"Y-m-d H:i" }}</td>
+          <td class="text-left">
+            <a href="{% url 'manufacturing_detail' m.pk %}" class="btn btn-ghost btn-xs">عرض</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">{% include "partials/empty.html" with title="لا توجد متابعات تصنيع" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if perms.core.add_manufacturing %}
+<dialog id="mfg_modal" class="modal">
+  <div class="modal-box">
+    <h3 class="text-lg font-bold">إنشاء متابعة تصنيع</h3>
+    <p class="mt-1 text-xs opacity-60">تُبنى المتابعة من مراحل وخطوات التصنيع النشطة حالياً</p>
+    <form method="post" action="{% url 'manufacturing_create' %}" class="mt-4 space-y-3">
+      {% csrf_token %}
+      {% include "partials/field.html" with field=create_form.project %}
+      <div class="modal-action">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="mfg_modal.close()">إلغاء</button>
+        <button type="submit" class="btn btn-primary btn-sm">إنشاء</button>
+      </div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>إغلاق</button></form>
+</dialog>
+{% endif %}
+{% endblock %}

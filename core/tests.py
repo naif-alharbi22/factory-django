@@ -4,7 +4,10 @@ from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import User
+from .models import (
+    Manufacturing, ManufacturingPhase, ManufacturingStage, Project,
+    StageStatus, User,
+)
 from .permissions import ALL_CODENAMES, DEFAULT_GROUPS
 
 
@@ -90,6 +93,10 @@ class ViewEnforcementTests(TestCase):
         ("user_list", "view_users", []),
         ("group_list", "view_groups", []),
         ("group_create", "add_group", []),
+        ("manufacturing_list", "view_manufacturing", []),
+        ("workflow_settings", "view_manufacturing_config", []),
+        ("phase_create", "add_manufacturing_phase", []),
+        ("stage_create", "add_manufacturing_stage", []),
     ]
 
     def test_permission_grants_access(self):
@@ -205,3 +212,263 @@ class UserManagementTests(TestCase):
         user = User.objects.get(pk=user.pk)
         self.assertEqual(user.group_name, "محاسب")
         self.assertTrue(user.has_perm("core.view_projects"))
+
+
+# ===================== التصنيع =====================
+def make_workflow(*phase_specs):
+    """يبني تهيئة سير عمل بأسماء عشوائية — لإثبات أن المنطق لا يعتمد على الأسماء.
+
+    phase_specs: أزواج (اسم المرحلة، [أسماء الخطوات بالترتيب])
+    """
+    # تعطيل أي تهيئة سابقة (بما فيها البذور) حتى تكون البيئة معزولة
+    ManufacturingPhase.objects.update(is_active=False)
+    stages = {}
+    for order, (phase_name, stage_names) in enumerate(phase_specs, start=1):
+        phase = ManufacturingPhase.objects.create(name=phase_name, order=order)
+        for stage_order, stage_name in enumerate(stage_names, start=1):
+            stages[stage_name] = ManufacturingStage.objects.create(
+                phase=phase, name=stage_name, order=stage_order
+            )
+    return stages
+
+
+def workflow_names(manufacturing):
+    return [r.stage.name for r in manufacturing.ordered_records()]
+
+
+class SeedDataTests(TestCase):
+    """البذور الافتراضية أُنشئت بالترحيل ولم تُكرَّر."""
+
+    def test_default_workflow_seeded(self):
+        phases = list(ManufacturingPhase.objects.order_by("order"))
+        self.assertEqual([p.name for p in phases], ["التصنيع", "التنفيذ النهائي"])
+        self.assertEqual(
+            [s.name for s in phases[0].stages.order_by("order")], ["قص", "تجميع"]
+        )
+        self.assertEqual(
+            [s.name for s in phases[1].stages.order_by("order")], ["تركيب", "تسليم"]
+        )
+
+    def test_seed_is_idempotent(self):
+        from importlib import import_module
+        from django.apps import apps as global_apps
+
+        migration = import_module(
+            "core.migrations.0005_manufacturingphase_alter_apppermission_options_and_more"
+        )
+        before = (
+            ManufacturingPhase.objects.count(),
+            ManufacturingStage.objects.count(),
+        )
+        migration.seed_manufacturing(global_apps, None)
+        after = (
+            ManufacturingPhase.objects.count(),
+            ManufacturingStage.objects.count(),
+        )
+        self.assertEqual(before, after)
+
+
+class WorkflowConfigTests(TestCase):
+    """سير العمل يُحسب من التهيئة، لا من أسماء أو ثوابت في الكود."""
+
+    def test_new_workflow_uses_current_active_config(self):
+        make_workflow(("Phase X", ["Stage A", "Stage B"]), ("Phase Y", ["Stage C"]))
+        m = Manufacturing.create_for_project(Project.objects.create(name="p1"))
+        self.assertEqual(workflow_names(m), ["Stage A", "Stage B", "Stage C"])
+
+    def test_reorder_changes_workflow_dynamically(self):
+        stages = make_workflow(("Phase X", ["Stage A", "Stage B"]))
+        stages["Stage A"].order, stages["Stage B"].order = 2, 1
+        stages["Stage A"].save()
+        stages["Stage B"].save()
+        m = Manufacturing.create_for_project(Project.objects.create(name="p2"))
+        self.assertEqual(workflow_names(m), ["Stage B", "Stage A"])
+
+    def test_added_stage_appears_in_new_workflows_only(self):
+        stages = make_workflow(("Phase X", ["Stage A", "Stage C"]))
+        old = Manufacturing.create_for_project(Project.objects.create(name="old"))
+        # إدراج خطوة وسيطة بين A و C — بترتيب بيني دون أي تعديل كود
+        ManufacturingStage.objects.create(
+            phase=stages["Stage A"].phase, name="Stage B", order=1
+        )
+        stages["Stage A"].order = 0
+        stages["Stage A"].save()
+        new = Manufacturing.create_for_project(Project.objects.create(name="new"))
+        self.assertEqual(workflow_names(new), ["Stage A", "Stage B", "Stage C"])
+        self.assertEqual(workflow_names(old), ["Stage A", "Stage C"])
+
+    def test_inactive_stage_excluded_from_new_workflows(self):
+        stages = make_workflow(("Phase X", ["Stage A", "Stage B", "Stage C"]))
+        stages["Stage B"].is_active = False
+        stages["Stage B"].save()
+        m = Manufacturing.create_for_project(Project.objects.create(name="p3"))
+        self.assertEqual(workflow_names(m), ["Stage A", "Stage C"])
+
+    def test_no_active_stages_rejected(self):
+        ManufacturingPhase.objects.update(is_active=False)
+        with self.assertRaises(ValueError):
+            Manufacturing.create_for_project(Project.objects.create(name="p4"))
+
+
+class WorkflowProgressionTests(TestCase):
+    """قواعد التقدم عامة وتعمل مع أي أسماء وأي عدد خطوات."""
+
+    def setUp(self):
+        make_workflow(("Phase X", ["Stage A", "Stage B"]), ("Phase Y", ["Stage C"]))
+        self.m = Manufacturing.create_for_project(Project.objects.create(name="p"))
+        self.a, self.b, self.c = list(self.m.ordered_records())
+
+    def test_first_active_stage_is_starting_stage(self):
+        self.assertEqual(self.m.current_record.pk, self.a.pk)
+        self.assertIsNone(self.a.blocked_by)
+
+    def test_cannot_complete_before_previous_done(self):
+        self.assertEqual(self.b.blocked_by.pk, self.a.pk)
+        self.assertEqual(self.c.blocked_by.pk, self.a.pk)
+        self.assertFalse(self.b.can_advance)
+
+    def test_progression_in_order(self):
+        for record in (self.a, self.b, self.c):
+            record.refresh_from_db()
+            self.assertTrue(record.can_advance)
+            record.status = StageStatus.DONE
+            record.save()
+        self.m.refresh_from_db()
+        self.assertTrue(self.m.is_complete)
+        self.assertIsNone(self.m.current_record)
+
+    def test_status_update_view_enforces_order(self):
+        boss = make_user("wf-boss", Group.objects.get(name="مدير"))
+        self.client.force_login(boss)
+        # محاولة إكمال الخطوة الثانية قبل الأولى تُرفض
+        self.client.post(
+            reverse("manufacturing_record_status", args=[self.b.pk]),
+            {"action": "complete"},
+        )
+        self.b.refresh_from_db()
+        self.assertEqual(self.b.status, StageStatus.NOT_STARTED)
+        # إكمال الأولى ثم الثانية يمر
+        self.client.post(
+            reverse("manufacturing_record_status", args=[self.a.pk]),
+            {"action": "complete"},
+        )
+        self.client.post(
+            reverse("manufacturing_record_status", args=[self.b.pk]),
+            {"action": "complete"},
+        )
+        self.b.refresh_from_db()
+        self.assertEqual(self.b.status, StageStatus.DONE)
+        self.assertIsNotNone(self.b.completed_at)
+
+
+class ManufacturingPagesTests(TestCase):
+    """صفحات التصنيع تعرض البيانات المهيّأة ديناميكياً."""
+
+    def test_detail_page_renders_configured_workflow(self):
+        make_workflow(("Phase X", ["Stage A", "Stage B"]))
+        m = Manufacturing.create_for_project(Project.objects.create(name="p"))
+        boss = make_user("pages-boss", Group.objects.get(name="مدير"))
+        self.client.force_login(boss)
+        response = self.client.get(reverse("manufacturing_detail", args=[m.pk]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        for name in ("Phase X", "Stage A", "Stage B"):
+            self.assertIn(name, content)
+        response = self.client.get(reverse("manufacturing_list"))
+        self.assertContains(response, "Stage A")  # الخطوة الحالية في الجدول
+
+
+class HistoricalIntegrityTests(TestCase):
+    """تعديل التهيئة لا يفسد السجلات التاريخية."""
+
+    def setUp(self):
+        self.stages = make_workflow(("Phase X", ["Stage A", "Stage B", "Stage C"]))
+        self.m = Manufacturing.create_for_project(Project.objects.create(name="p"))
+
+    def test_rename_preserves_records(self):
+        record = self.m.ordered_records()[0]
+        stage = self.stages["Stage A"]
+        stage.name = "Stage A — renamed"
+        stage.save()
+        record.refresh_from_db()
+        self.assertEqual(record.stage_id, stage.pk)
+        self.assertEqual(record.stage.name, "Stage A — renamed")
+
+    def test_deactivation_keeps_history_visible(self):
+        self.stages["Stage B"].is_active = False
+        self.stages["Stage B"].save()
+        names = workflow_names(self.m)
+        self.assertIn("Stage B", names)  # يبقى في السجل التاريخي
+        active = [r.stage.name for r in self.m.active_records()]
+        self.assertNotIn("Stage B", active)  # ولا يُحسب في سير العمل النشط
+
+    def test_deactivated_stage_does_not_block_progression(self):
+        a, b, c = list(self.m.ordered_records())
+        self.stages["Stage B"].is_active = False
+        self.stages["Stage B"].save()
+        a.status = StageStatus.DONE
+        a.save()
+        c.refresh_from_db()
+        self.assertTrue(c.can_advance)
+
+    def test_delete_stage_with_records_is_blocked(self):
+        boss = make_user("hist-boss", Group.objects.get(name="مدير"))
+        self.client.force_login(boss)
+        stage = self.stages["Stage A"]
+        self.client.post(reverse("stage_delete", args=[stage.pk]))
+        self.assertTrue(ManufacturingStage.objects.filter(pk=stage.pk).exists())
+        phase = stage.phase
+        self.client.post(reverse("phase_delete", args=[phase.pk]))
+        self.assertTrue(ManufacturingPhase.objects.filter(pk=phase.pk).exists())
+
+    def test_delete_unused_stage_allowed(self):
+        boss = make_user("hist-boss2", Group.objects.get(name="مدير"))
+        self.client.force_login(boss)
+        unused = ManufacturingStage.objects.create(
+            phase=self.stages["Stage A"].phase, name="Stage Z", order=9
+        )
+        self.client.post(reverse("stage_delete", args=[unused.pk]))
+        self.assertFalse(ManufacturingStage.objects.filter(pk=unused.pk).exists())
+
+
+class ProgressCalculationTests(TestCase):
+    """نسبة الإنجاز تُحسب ديناميكياً من الخطوات النشطة."""
+
+    def setUp(self):
+        self.stages = make_workflow(("Phase X", ["Stage A", "Stage B", "Stage C"]))
+        self.m = Manufacturing.create_for_project(Project.objects.create(name="p"))
+
+    def test_completion_changes_percentage(self):
+        self.assertEqual(self.m.progress_percent, 0)
+        a = self.m.ordered_records()[0]
+        a.status = StageStatus.DONE
+        a.save()
+        self.assertEqual(self.m.progress_percent, 33)
+
+    def test_deactivating_stage_recalculates_percentage(self):
+        a = self.m.ordered_records()[0]
+        a.status = StageStatus.DONE
+        a.save()
+        self.assertEqual(self.m.progress_percent, 33)  # 1 من 3
+        self.stages["Stage B"].is_active = False
+        self.stages["Stage B"].save()
+        self.assertEqual(self.m.progress_percent, 50)  # 1 من 2 نشطتين
+
+    def test_new_stage_affects_new_workflows_percentage(self):
+        # في المتابعة القائمة: إكمال الكل = 100% بثلاث خطوات
+        for record in self.m.ordered_records():
+            record.status = StageStatus.DONE
+            record.save()
+        self.assertEqual(self.m.progress_percent, 100)
+        # إضافة خطوة نشطة جديدة لا تفسد المتابعة القائمة
+        ManufacturingStage.objects.create(
+            phase=self.stages["Stage A"].phase, name="Stage D", order=9
+        )
+        self.assertEqual(self.m.progress_percent, 100)
+        # لكنها تدخل في حساب المتابعات الجديدة
+        new = Manufacturing.create_for_project(Project.objects.create(name="p2"))
+        done = list(new.ordered_records())
+        for record in done[:2]:
+            record.status = StageStatus.DONE
+            record.save()
+        self.assertEqual(new.progress_percent, 50)  # 2 من 4

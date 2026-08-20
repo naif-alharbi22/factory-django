@@ -47,6 +47,23 @@ urlpatterns = [
 
     path("compare/", views.compare, name="compare"),
 
+    path("manufacturing/", views.manufacturing_list, name="manufacturing_list"),
+    path("manufacturing/new/", views.manufacturing_create, name="manufacturing_create"),
+    path("manufacturing/settings/", views.workflow_settings, name="workflow_settings"),
+    path("manufacturing/settings/phases/new/", views.phase_create, name="phase_create"),
+    path("manufacturing/settings/phases/<int:pk>/edit/", views.phase_edit, name="phase_edit"),
+    path("manufacturing/settings/phases/<int:pk>/toggle/", views.phase_toggle, name="phase_toggle"),
+    path("manufacturing/settings/phases/<int:pk>/delete/", views.phase_delete, name="phase_delete"),
+    path("manufacturing/settings/phases/<int:pk>/move/", views.phase_move, name="phase_move"),
+    path("manufacturing/settings/stages/new/", views.stage_create, name="stage_create"),
+    path("manufacturing/settings/stages/<int:pk>/edit/", views.stage_edit, name="stage_edit"),
+    path("manufacturing/settings/stages/<int:pk>/toggle/", views.stage_toggle, name="stage_toggle"),
+    path("manufacturing/settings/stages/<int:pk>/delete/", views.stage_delete, name="stage_delete"),
+    path("manufacturing/settings/stages/<int:pk>/move/", views.stage_move, name="stage_move"),
+    path("manufacturing/records/<int:pk>/status/", views.manufacturing_record_status, name="manufacturing_record_status"),
+    path("manufacturing/records/<int:pk>/note/", views.manufacturing_record_note, name="manufacturing_record_note"),
+    path("manufacturing/<int:pk>/", views.manufacturing_detail, name="manufacturing_detail"),
+
     path("users/", views.user_list, name="user_list"),
     path("users/new/", views.user_create, name="user_create"),
     path("users/<int:pk>/edit/", views.user_edit, name="user_edit"),

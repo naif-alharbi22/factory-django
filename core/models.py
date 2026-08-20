@@ -399,3 +399,190 @@ class Expense(models.Model):
 
     def __str__(self):
         return self.title
+
+# ===================== التصنيع =====================
+# سير عمل التصنيع محرّك قابل للتهيئة بالكامل: المراحل والخطوات سجلات في
+# قاعدة البيانات تُدار من الواجهة، ولا يعتمد أي منطق على أسمائها أو عددها.
+class ManufacturingPhase(models.Model):
+    name = models.CharField("الاسم", max_length=100)
+    description = models.TextField("الوصف", blank=True, null=True)
+    order = models.PositiveIntegerField("الترتيب", default=0)
+    is_active = models.BooleanField("نشطة", default=True)
+    created_at = models.DateTimeField("تاريخ الإنشاء", default=timezone.now)
+    updated_at = models.DateTimeField("آخر تعديل", auto_now=True)
+
+    class Meta:
+        verbose_name = "مرحلة تصنيع"
+        verbose_name_plural = "مراحل التصنيع"
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return self.name
+
+
+class ManufacturingStage(models.Model):
+    phase = models.ForeignKey(
+        ManufacturingPhase, verbose_name="المرحلة", on_delete=models.CASCADE,
+        related_name="stages",
+    )
+    name = models.CharField("الاسم", max_length=100)
+    description = models.TextField("الوصف", blank=True, null=True)
+    order = models.PositiveIntegerField("الترتيب", default=0)
+    is_active = models.BooleanField("نشطة", default=True)
+    created_at = models.DateTimeField("تاريخ الإنشاء", default=timezone.now)
+    updated_at = models.DateTimeField("آخر تعديل", auto_now=True)
+
+    class Meta:
+        verbose_name = "خطوة تصنيع"
+        verbose_name_plural = "خطوات التصنيع"
+        ordering = ["phase__order", "order", "id"]
+
+    def __str__(self):
+        return self.name
+
+
+class StageStatus(models.TextChoices):
+    NOT_STARTED = "not_started", "لم يبدأ"
+    IN_PROGRESS = "in_progress", "قيد التنفيذ"
+    DONE = "done", "مكتمل"
+
+
+class Manufacturing(models.Model):
+    """متابعة تصنيع مشروع — لقطة من الخطوات المهيّأة وقت الإنشاء."""
+
+    project = models.OneToOneField(
+        Project, verbose_name="المشروع", on_delete=models.CASCADE,
+        related_name="manufacturing",
+    )
+    created_at = models.DateTimeField("تاريخ الإنشاء", default=timezone.now)
+    updated_at = models.DateTimeField("آخر تعديل", auto_now=True)
+
+    class Meta:
+        verbose_name = "متابعة تصنيع"
+        verbose_name_plural = "متابعات التصنيع"
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"تصنيع {self.project.name}"
+
+    @classmethod
+    def create_for_project(cls, project):
+        """ينشئ متابعة بسجل لكل خطوة نشطة حسب التهيئة الحالية."""
+        stages = list(
+            ManufacturingStage.objects.filter(is_active=True, phase__is_active=True)
+            .order_by("phase__order", "order", "id")
+        )
+        if not stages:
+            raise ValueError("لا توجد خطوات تصنيع نشطة — هيّئ مراحل التصنيع أولاً")
+        manufacturing = cls.objects.create(project=project)
+        ManufacturingStageRecord.objects.bulk_create([
+            ManufacturingStageRecord(manufacturing=manufacturing, stage=stage)
+            for stage in stages
+        ])
+        return manufacturing
+
+    def ordered_records(self):
+        """كل السجلات بترتيب سير العمل المحسوب من ترتيب المراحل والخطوات."""
+        return (
+            self.records.select_related("stage", "stage__phase")
+            .order_by("stage__phase__order", "stage__order", "stage__id")
+        )
+
+    def active_records(self):
+        """السجلات المحسوبة في سير العمل — تُستثنى الخطوات الموقوفة."""
+        return [
+            record for record in self.ordered_records()
+            if record.is_active_step
+        ]
+
+    @property
+    def progress_percent(self):
+        """نسبة الإنجاز من الخطوات النشطة — تتغير تلقائياً مع تغيّر التهيئة."""
+        records = self.active_records()
+        if not records:
+            return 0
+        done = sum(1 for r in records if r.status == StageStatus.DONE)
+        return round(done * 100 / len(records))
+
+    @property
+    def current_record(self):
+        """أول خطوة نشطة غير مكتملة."""
+        for record in self.active_records():
+            if record.status != StageStatus.DONE:
+                return record
+        return None
+
+    @property
+    def is_complete(self):
+        records = self.active_records()
+        return bool(records) and all(r.status == StageStatus.DONE for r in records)
+
+    def phases_with_records(self):
+        """تجميع السجلات حسب المرحلة للعرض، بترتيب سير العمل."""
+        groups = []
+        for record in self.ordered_records():
+            phase = record.stage.phase
+            if not groups or groups[-1]["phase"].pk != phase.pk:
+                groups.append({"phase": phase, "records": []})
+            groups[-1]["records"].append(record)
+        return groups
+
+
+class ManufacturingStageRecord(models.Model):
+    """حالة خطوة واحدة في متابعة مشروع.
+
+    الربط بالخطوة عبر FK محمي (PROTECT): إعادة تسمية الخطوة تنعكس تلقائياً،
+    وإيقافها لا يمس السجل، وحذفها ممنوع ما دام مرجعاً في سجل تاريخي.
+    """
+
+    manufacturing = models.ForeignKey(
+        Manufacturing, verbose_name="المتابعة", on_delete=models.CASCADE,
+        related_name="records",
+    )
+    stage = models.ForeignKey(
+        ManufacturingStage, verbose_name="الخطوة", on_delete=models.PROTECT,
+        related_name="records",
+    )
+    status = models.CharField(
+        "الحالة", max_length=20, choices=StageStatus.choices,
+        default=StageStatus.NOT_STARTED,
+    )
+    started_at = models.DateTimeField("تاريخ البدء", blank=True, null=True)
+    completed_at = models.DateTimeField("تاريخ الإكمال", blank=True, null=True)
+    notes = models.TextField("ملاحظات", blank=True, null=True)
+    created_at = models.DateTimeField("تاريخ الإنشاء", default=timezone.now)
+    updated_at = models.DateTimeField("آخر تعديل", auto_now=True)
+
+    class Meta:
+        verbose_name = "سجل خطوة تصنيع"
+        verbose_name_plural = "سجلات خطوات التصنيع"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["manufacturing", "stage"], name="uniq_manufacturing_stage",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.stage.name} — {self.get_status_display()}"
+
+    @property
+    def is_active_step(self):
+        return self.stage.is_active and self.stage.phase.is_active
+
+    @property
+    def blocked_by(self):
+        """أول خطوة نشطة سابقة غير مكتملة — الخطوات الموقوفة لا تعيق التقدم."""
+        for record in self.manufacturing.ordered_records():
+            if record.pk == self.pk:
+                return None
+            if record.is_active_step and record.status != StageStatus.DONE:
+                return record
+        return None
+
+    @property
+    def can_advance(self):
+        return (
+            self.is_active_step
+            and self.status != StageStatus.DONE
+            and self.blocked_by is None
+        )

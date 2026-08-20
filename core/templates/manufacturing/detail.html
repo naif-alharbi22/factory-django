@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}تصنيع {{ manufacturing.project.name }} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+  <div class="flex items-start gap-3">
+    <a href="{% url 'manufacturing_list' %}" class="btn btn-ghost btn-sm btn-circle mt-1">→</a>
+    <div>
+      <h1 class="text-2xl font-bold">تصنيع: {{ manufacturing.project.name }}</h1>
+      <p class="mt-1 text-sm opacity-60">
+        {% if manufacturing.project.code %}<span class="nums">{{ manufacturing.project.code }}</span> · {% endif %}
+        بدأت المتابعة {{ manufacturing.created_at|date:"Y-m-d" }}
+      </p>
+    </div>
+  </div>
+  <a href="{% url 'project_detail' manufacturing.project.pk %}" class="btn btn-sm btn-outline">صفحة المشروع</a>
+</div>
+
+<!-- شريط التقدم الكلي -->
+<div class="card mb-6 bg-base-100 shadow-sm">
+  <div class="card-body p-5">
+    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <h2 class="font-bold">التقدم الكلي</h2>
+      <div class="flex items-center gap-2">
+        {% if manufacturing.is_complete %}
+          <span class="badge badge-success">مكتمل</span>
+        {% elif manufacturing.current_record %}
+          <span class="badge badge-info">الحالية: {{ manufacturing.current_record.stage.name }}</span>
+        {% endif %}
+        <span class="nums text-lg font-bold">{{ manufacturing.progress_percent }}%</span>
+      </div>
+    </div>
+    <progress class="progress {% if manufacturing.is_complete %}progress-success{% else %}progress-primary{% endif %} h-3 w-full"
+              value="{{ manufacturing.progress_percent }}" max="100"></progress>
+  </div>
+</div>
+
+<!-- المراحل والخطوات -->
+<div class="space-y-4">
+  {% for group in groups %}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">
+        {{ group.phase.name }}
+        {% if not group.phase.is_active %}<span class="badge badge-sm badge-ghost">موقوفة</span>{% endif %}
+      </h2>
+      {% if group.phase.description %}<p class="text-xs opacity-60">{{ group.phase.description }}</p>{% endif %}
+
+      <div class="mt-2 space-y-2">
+        {% for record in group.records %}
+        <div class="rounded-box border border-base-200 p-3 {% if record.status == StageStatus.IN_PROGRESS %}border-info/40 bg-info/5{% endif %}">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-3">
+              <span class="text-lg {% if record.status == StageStatus.DONE %}text-success{% elif record.status == StageStatus.IN_PROGRESS %}text-info{% else %}opacity-40{% endif %}">
+                {% if record.status == StageStatus.DONE %}✓{% elif record.status == StageStatus.IN_PROGRESS %}●{% else %}○{% endif %}
+              </span>
+              <div>
+                <div class="font-medium">
+                  {{ record.stage.name }}
+                  {% if not record.is_active_step %}
+                    <span class="badge badge-xs badge-ghost" title="خطوة موقوفة — تبقى في السجل التاريخي ولا تُحسب في التقدم">موقوفة</span>
+                  {% endif %}
+                </div>
+                <div class="text-[11px] opacity-60 nums">
+                  {% if record.started_at %}بدأت {{ record.started_at|date:"Y-m-d H:i" }}{% endif %}
+                  {% if record.completed_at %} · اكتملت {{ record.completed_at|date:"Y-m-d H:i" }}{% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="badge badge-sm
+                {% if record.status == StageStatus.DONE %}badge-success{% elif record.status == StageStatus.IN_PROGRESS %}badge-info{% else %}badge-ghost{% endif %}">
+                {{ record.get_status_display }}
+              </span>
+              {% if perms.core.update_manufacturing_stage and record.can_advance %}
+                {% if record.status == StageStatus.NOT_STARTED %}
+                <form method="post" action="{% url 'manufacturing_record_status' record.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="start">
+                  <button class="btn btn-xs btn-info">بدء</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{% url 'manufacturing_record_status' record.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="complete">
+                  <button class="btn btn-xs btn-success">إكمال</button>
+                </form>
+              {% endif %}
+              {% if perms.core.add_manufacturing_note %}
+                <button class="btn btn-ghost btn-xs" onclick="note_{{ record.pk }}.showModal()">ملاحظات</button>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if record.notes %}
+            <div class="mt-2 rounded-box bg-base-200/60 p-2 text-xs leading-relaxed opacity-80">{{ record.notes }}</div>
+          {% endif %}
+        </div>
+
+        {% if perms.core.add_manufacturing_note %}
+        <dialog id="note_{{ record.pk }}" class="modal">
+          <div class="modal-box">
+            <h3 class="text-lg font-bold">ملاحظات — {{ record.stage.name }}</h3>
+            <form method="post" action="{% url 'manufacturing_record_note' record.pk %}" class="mt-4 space-y-3">
+              {% csrf_token %}
+              <textarea name="notes" rows="4" class="textarea textarea-bordered w-full"
+                        placeholder="اكتب الملاحظات هنا">{{ record.notes|default:"" }}</textarea>
+              <div class="modal-action">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="note_{{ record.pk }}.close()">إلغاء</button>
+                <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+              </div>
+            </form>
+          </div>
+          <form method="dialog" class="modal-backdrop"><button>إغلاق</button></form>
+        </dialog>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  {% include "partials/empty.html" with title="لا توجد خطوات في هذه المتابعة" %}
+  {% endfor %}
+</div>
+{% endblock %}

@@ -20,6 +20,11 @@
     </div>
   </div>
   <div class="flex flex-wrap gap-2">
+    {% if perms.core.view_manufacturing and project.manufacturing %}
+      <a href="{% url 'manufacturing_detail' project.manufacturing.pk %}" class="btn btn-sm btn-outline">
+        التصنيع <span class="nums">{{ project.manufacturing.progress_percent }}%</span>
+      </a>
+    {% endif %}
     {% if perms.core.view_reports %}
       <a href="{% url 'project_report' project.pk %}" class="btn btn-sm btn-outline">تحميل التقرير PDF</a>
     {% endif %}
