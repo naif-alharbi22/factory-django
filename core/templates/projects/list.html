@@ -8,7 +8,7 @@
     <h1 class="text-2xl font-bold">قائمة المشاريع</h1>
     <p class="mt-1 text-sm opacity-60"><span class="nums">{{ total }}</span> مشروع</p>
   </div>
-  {% if user.can_edit_data %}
+  {% if perms.core.add_project %}
     <a href="{% url 'project_create' %}" class="btn btn-sm btn-primary">+ مشروع جديد</a>
   {% endif %}
 </div>

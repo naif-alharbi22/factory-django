@@ -10,12 +10,14 @@
       <span class="nums">{{ total }}</span> موظف · <span class="nums">{{ active_count }}</span> نشط
     </p>
   </div>
-  {% if user.can_edit_data %}
   <div class="flex flex-wrap gap-2">
-    <button class="btn btn-sm btn-outline" onclick="hours_modal.showModal()">تحضير موظف</button>
-    <a href="{% url 'worker_create' %}" class="btn btn-sm btn-primary">+ موظف جديد</a>
+    {% if perms.core.add_work_hours %}
+      <button class="btn btn-sm btn-outline" onclick="hours_modal.showModal()">تحضير موظف</button>
+    {% endif %}
+    {% if perms.core.add_worker %}
+      <a href="{% url 'worker_create' %}" class="btn btn-sm btn-primary">+ موظف جديد</a>
+    {% endif %}
   </div>
-  {% endif %}
 </div>
 
 <div class="card mb-4 bg-base-100 shadow-sm">
@@ -36,7 +38,7 @@
 
 {% include "workers/_table.html" %}
 
-{% if user.can_edit_data %}
+{% if perms.core.add_work_hours %}
 <dialog id="hours_modal" class="modal">
   <div class="modal-box">
     <h3 class="text-lg font-bold">تحضير موظف في مشروع</h3>

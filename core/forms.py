@@ -4,10 +4,12 @@ from decimal import Decimal
 
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth.models import Group
 
 from .models import (
-    Expense, Invoice, Project, ProjectPayment, Role, User, Worker, WorkHour,
+    Expense, Invoice, Project, ProjectPayment, User, Worker, WorkHour,
 )
+from .permissions import ALL_CODENAMES, ALL_PERMISSIONS
 
 BASE_INPUT = "input input-bordered w-full"
 BASE_SELECT = "select select-bordered w-full"
@@ -189,6 +191,11 @@ class ExpenseForm(StyledModelForm):
 
 
 class UserCreateForm(StyledModelForm):
+    group = forms.ModelChoiceField(
+        label="المجموعة", queryset=Group.objects.order_by("name"),
+        empty_label=None,
+        help_text="يرث المستخدم كل صلاحيات المجموعة تلقائياً",
+    )
     password = forms.CharField(
         label="كلمة المرور", min_length=6,
         widget=forms.PasswordInput(attrs={"class": BASE_INPUT, "autocomplete": "new-password"}),
@@ -196,7 +203,7 @@ class UserCreateForm(StyledModelForm):
 
     class Meta:
         model = User
-        fields = ["username", "full_name", "role"]
+        fields = ["username", "full_name"]
 
     def clean_username(self):
         username = self.cleaned_data["username"].strip()
@@ -209,14 +216,18 @@ class UserCreateForm(StyledModelForm):
     def save(self, commit=True):
         user = super().save(commit=False)
         user.set_password(self.cleaned_data["password"])
-        user.is_staff = user.role == Role.ADMIN
-        user.is_superuser = user.role == Role.ADMIN
         if commit:
             user.save()
+            user.groups.set([self.cleaned_data["group"]])
         return user
 
 
 class UserEditForm(StyledModelForm):
+    group = forms.ModelChoiceField(
+        label="المجموعة", queryset=Group.objects.order_by("name"),
+        empty_label=None,
+        help_text="يرث المستخدم كل صلاحيات المجموعة تلقائياً",
+    )
     password = forms.CharField(
         label="كلمة مرور جديدة (اختياري)", required=False, min_length=6,
         widget=forms.PasswordInput(attrs={"class": BASE_INPUT, "autocomplete": "new-password"}),
@@ -224,15 +235,56 @@ class UserEditForm(StyledModelForm):
 
     class Meta:
         model = User
-        fields = ["full_name", "role", "is_active"]
+        fields = ["full_name", "is_active"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["group"].initial = self.instance.groups.first()
 
     def save(self, commit=True):
         user = super().save(commit=False)
         password = self.cleaned_data.get("password")
         if password:
             user.set_password(password)
-        user.is_staff = user.role == Role.ADMIN
-        user.is_superuser = user.role == Role.ADMIN
         if commit:
             user.save()
+            user.groups.set([self.cleaned_data["group"]])
         return user
+
+
+class GroupForm(StyledModelForm):
+    """مجموعة صلاحيات — الاسم مع اختيار حر لصلاحيات كل قسم."""
+
+    permissions = forms.MultipleChoiceField(
+        label="الصلاحيات", required=False,
+        choices=ALL_PERMISSIONS,
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = Group
+        fields = ["name"]
+        labels = {"name": "اسم المجموعة"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["permissions"].initial = list(
+                self.instance.permissions.values_list("codename", flat=True)
+            )
+
+    def save(self, commit=True):
+        from django.contrib.auth.models import Permission
+
+        group = super().save(commit)
+        if commit:
+            selected = set(self.cleaned_data["permissions"])
+            group.permissions.set(
+                Permission.objects.filter(
+                    content_type__app_label="core",
+                    content_type__model="apppermission",
+                    codename__in=[c for c in ALL_CODENAMES if c in selected],
+                )
+            )
+        return group

@@ -20,8 +20,10 @@
     </div>
   </div>
   <div class="flex flex-wrap gap-2">
-    <a href="{% url 'project_report' project.pk %}" class="btn btn-sm btn-outline">تحميل التقرير PDF</a>
-    {% if user.can_edit_data %}
+    {% if perms.core.view_reports %}
+      <a href="{% url 'project_report' project.pk %}" class="btn btn-sm btn-outline">تحميل التقرير PDF</a>
+    {% endif %}
+    {% if perms.core.edit_project %}
       <a href="{% url 'project_edit' project.pk %}" class="btn btn-sm btn-primary">تعديل</a>
     {% endif %}
   </div>
@@ -93,7 +95,7 @@
         <div class="flex items-center gap-3 text-xs">
           <span class="opacity-60">الإجمالي: <span class="nums font-bold">{{ invoice_totals.total|money }}</span></span>
           <span class="opacity-60">المدفوع: <span class="nums font-bold text-success">{{ invoice_totals.paid|money }}</span></span>
-          {% if user.can_edit_data %}
+          {% if perms.core.add_invoice %}
             <a href="{% url 'invoice_create' %}?project={{ project.pk }}" class="btn btn-xs btn-primary">+ فاتورة</a>
           {% endif %}
         </div>
@@ -101,7 +103,7 @@
 
       <div class="mt-2 max-h-96 overflow-x-auto">
         <table class="table table-xs table-pin-rows">
-          <thead><tr><th>الرقم</th><th>البيان</th><th>التاريخ</th><th class="text-left">الإجمالي</th><th class="text-left">المدفوع</th><th>الحالة</th>{% if user.can_edit_data %}<th></th>{% endif %}</tr></thead>
+          <thead><tr><th>الرقم</th><th>البيان</th><th>التاريخ</th><th class="text-left">الإجمالي</th><th class="text-left">المدفوع</th><th>الحالة</th>{% if perms.core.edit_invoice %}<th></th>{% endif %}</tr></thead>
           <tbody>
             {% for invoice in invoices %}
             <tr class="hover">
@@ -111,7 +113,7 @@
               <td class="nums text-left">{{ invoice.total_amount|money }}</td>
               <td class="nums text-left">{{ invoice.paid_amount|money }}</td>
               <td><span class="badge badge-xs {{ invoice.status|status_badge }}">{{ invoice.get_status_display }}</span></td>
-              {% if user.can_edit_data %}
+              {% if perms.core.edit_invoice %}
               <td class="text-left">
                 <a href="{% url 'invoice_edit' invoice.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
               </td>
@@ -135,7 +137,7 @@
     </h2>
     <div class="mt-2 max-h-96 overflow-x-auto">
       <table class="table table-xs table-pin-rows">
-        <thead><tr><th>الموظف</th><th>التاريخ</th><th class="text-left">عادية</th><th class="text-left">إضافية</th><th class="text-left">التكلفة</th>{% if user.can_edit_data %}<th></th>{% endif %}</tr></thead>
+        <thead><tr><th>الموظف</th><th>التاريخ</th><th class="text-left">عادية</th><th class="text-left">إضافية</th><th class="text-left">التكلفة</th>{% if perms.core.delete_work_hours %}<th></th>{% endif %}</tr></thead>
         <tbody>
           {% for row in hours %}
           <tr class="hover">
@@ -144,7 +146,7 @@
             <td class="nums text-left">{{ row.regular_hours|hours }}</td>
             <td class="nums text-left">{{ row.overtime_hours|hours }}</td>
             <td class="nums text-left font-medium">{{ row.total_cost|money }}</td>
-            {% if user.can_edit_data %}
+            {% if perms.core.delete_work_hours %}
             <td class="text-left">
               <form method="post" action="{% url 'hours_delete' row.pk %}" onsubmit="return confirm('حذف سجل الساعات؟')">
                 {% csrf_token %}
@@ -170,7 +172,7 @@
         <h2 class="card-title text-base">
           دفعات المشروع <span class="badge badge-sm badge-ghost nums">{{ payments|length }}</span>
         </h2>
-        {% if user.can_edit_data %}
+        {% if perms.core.add_project_payment %}
           <button class="btn btn-xs btn-success" onclick="payment_modal.showModal()">+ دفعة</button>
         {% endif %}
       </div>
@@ -201,7 +203,7 @@
         <h2 class="card-title text-base">
           المصروفات <span class="badge badge-sm badge-ghost nums">{{ expenses|length }}</span>
         </h2>
-        {% if user.can_edit_data %}
+        {% if perms.core.add_project_expense %}
           <button class="btn btn-xs btn-warning" onclick="expense_modal.showModal()">+ مصروف</button>
         {% endif %}
       </div>
@@ -226,7 +228,7 @@
   </div>
 </div>
 
-{% if user.can_edit_data %}
+{% if perms.core.add_project_payment %}
 <!-- نافذة الدفعة -->
 <dialog id="payment_modal" class="modal">
   <div class="modal-box">
@@ -249,7 +251,9 @@
   </div>
   <form method="dialog" class="modal-backdrop"><button>إغلاق</button></form>
 </dialog>
+{% endif %}
 
+{% if perms.core.add_project_expense %}
 <!-- نافذة المصروف -->
 <dialog id="expense_modal" class="modal">
   <div class="modal-box">

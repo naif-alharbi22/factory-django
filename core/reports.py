@@ -11,12 +11,12 @@ from django.utils.text import slugify
 from urllib.parse import quote
 
 from .models import Project
-from .permissions import staff_area
+from .permissions import require_perm
 from .services import ZERO, calc_project_cost, project_hours_with_costs
 
 
 @login_required
-@staff_area
+@require_perm("view_reports")
 def project_report_pdf(request, pk):
     """تقرير المشروع الكامل بصيغة PDF."""
     from weasyprint import HTML  # استيراد مؤجل ليبقى بدء الخادم سريعاً

@@ -6,6 +6,8 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 from django.utils import timezone
 
+from . import permissions as permissions_registry
+
 MONEY = {"max_digits": 14, "decimal_places": 2}
 HOURS = {"max_digits": 7, "decimal_places": 2}
 # أجور الساعة محسوبة بالقسمة (مثال: 2700 ÷ 208 ساعة) فتُحفظ بدقة عالية
@@ -13,11 +15,20 @@ HOURS = {"max_digits": 7, "decimal_places": 2}
 RATE = {"max_digits": 18, "decimal_places": 10}
 
 
-# ===================== المستخدمون =====================
-class Role(models.TextChoices):
-    ADMIN = "admin", "مدير"
-    ACCOUNTANT = "accountant", "محاسب"
-    EMPLOYEE = "employee", "موظف"
+# ===================== المستخدمون والصلاحيات =====================
+class AppPermission(models.Model):
+    """نموذج بلا جدول — يحمل صلاحيات أقسام النظام في auth.Permission.
+
+    السجل الفعلي للصلاحيات في core/permissions.py (PERMISSION_MODULES)،
+    وتُنشأ صفوف auth.Permission تلقائياً بعد الترحيلات (post_migrate).
+    """
+
+    class Meta:
+        managed = False
+        default_permissions = ()
+        permissions = permissions_registry.ALL_PERMISSIONS
+        verbose_name = "صلاحية النظام"
+        verbose_name_plural = "صلاحيات النظام"
 
 
 class UserManager(BaseUserManager):
@@ -30,7 +41,6 @@ class UserManager(BaseUserManager):
         return user
 
     def create_superuser(self, username, password=None, **extra):
-        extra.setdefault("role", Role.ADMIN)
         extra.setdefault("is_staff", True)
         extra.setdefault("is_superuser", True)
         extra.setdefault("full_name", username)
@@ -40,7 +50,6 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     username = models.CharField("اسم المستخدم", max_length=50, unique=True)
     full_name = models.CharField("الاسم الكامل", max_length=100)
-    role = models.CharField("الصلاحية", max_length=20, choices=Role.choices, default=Role.EMPLOYEE)
     is_active = models.BooleanField("نشط", default=True)
     is_staff = models.BooleanField("موظف إداري", default=False)
     created_at = models.DateTimeField("تاريخ الإنشاء", default=timezone.now)
@@ -59,23 +68,25 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return f"{self.full_name} ({self.username})"
 
-    # صلاحيات النظام
+    # صلاحيات النظام — تُشتق من مجموعة المستخدم (auth.Group)
     @property
-    def is_admin(self):
-        return self.role == Role.ADMIN
+    def group(self):
+        """مجموعة المستخدم — يُسنَد كل مستخدم لمجموعة واحدة."""
+        return self.groups.first()
 
     @property
-    def is_accountant(self):
-        return self.role == Role.ACCOUNTANT
-
-    @property
-    def can_edit_data(self):
-        """المدير والمحاسب يعدّلان بيانات المشاريع والموظفين والفواتير."""
-        return self.role in (Role.ADMIN, Role.ACCOUNTANT)
+    def group_name(self):
+        group = self.group
+        if group:
+            return group.name
+        return "مدير النظام" if self.is_superuser else "بدون مجموعة"
 
     @property
     def is_employee_only(self):
-        return self.role == Role.EMPLOYEE
+        """بدون أي صلاحيات أقسام — صفحته الوحيدة تسجيل الساعات."""
+        if self.is_superuser:
+            return False
+        return not self.get_all_permissions()
 
 
 # ===================== المراجع =====================

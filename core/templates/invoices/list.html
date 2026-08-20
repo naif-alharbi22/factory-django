@@ -8,7 +8,7 @@
     <h1 class="text-2xl font-bold">الفواتير</h1>
     <p class="mt-1 text-sm opacity-60"><span class="nums">{{ total }}</span> فاتورة</p>
   </div>
-  {% if user.can_edit_data %}
+  {% if perms.core.add_invoice %}
     <a href="{% url 'invoice_create' %}" class="btn btn-sm btn-primary">+ فاتورة جديدة</a>
   {% endif %}
 </div>

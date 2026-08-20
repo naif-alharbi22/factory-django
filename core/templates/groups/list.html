@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}المجموعات — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold">مجموعات الصلاحيات</h1>
+    <p class="mt-1 text-sm opacity-60">كل مجموعة تضم صلاحيات الأقسام التي تختارها، ويرثها أعضاؤها تلقائياً</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if perms.core.view_users %}
+      <a href="{% url 'user_list' %}" class="btn btn-sm btn-outline">المستخدمون</a>
+    {% endif %}
+    {% if perms.core.add_group %}
+      <a href="{% url 'group_create' %}" class="btn btn-sm btn-primary">+ مجموعة جديدة</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid gap-4 lg:grid-cols-2">
+  {% for group in groups %}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="card-title text-base">
+          {{ group.name }}
+          <span class="badge badge-sm badge-ghost nums">{{ group.members }} مستخدم</span>
+        </h2>
+        <div class="flex gap-1">
+          {% if perms.core.edit_group %}
+            <a href="{% url 'group_edit' group.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+          {% endif %}
+          {% if perms.core.delete_group %}
+          <form method="post" action="{% url 'group_delete' group.pk %}"
+                onsubmit="return confirm('حذف المجموعة {{ group.name }}؟')">
+            {% csrf_token %}
+            <button class="btn btn-ghost btn-xs text-error" {% if group.members %}disabled title="بها مستخدمون"{% endif %}>حذف</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="mt-2 flex flex-wrap gap-1">
+        {% for perm in group.permissions.all %}
+          <span class="badge badge-sm badge-outline">{{ perm.name }}</span>
+        {% empty %}
+          <span class="text-xs opacity-50">بدون صلاحيات — صفحة تسجيل الساعات فقط</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="lg:col-span-2">
+    {% include "partials/empty.html" with title="لا توجد مجموعات" %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

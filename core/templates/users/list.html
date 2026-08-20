@@ -6,22 +6,29 @@
 <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
   <div>
     <h1 class="text-2xl font-bold">إدارة المستخدمين</h1>
-    <p class="mt-1 text-sm opacity-60">صلاحيات الوصول إلى النظام</p>
+    <p class="mt-1 text-sm opacity-60">كل مستخدم يتبع مجموعة ويرث صلاحياتها تلقائياً</p>
   </div>
-  <a href="{% url 'user_create' %}" class="btn btn-sm btn-primary">+ مستخدم جديد</a>
+  <div class="flex flex-wrap gap-2">
+    {% if perms.core.view_groups %}
+      <a href="{% url 'group_list' %}" class="btn btn-sm btn-outline">إدارة المجموعات</a>
+    {% endif %}
+    {% if perms.core.add_user %}
+      <a href="{% url 'user_create' %}" class="btn btn-sm btn-primary">+ مستخدم جديد</a>
+    {% endif %}
+  </div>
 </div>
 
-<div class="mb-4 grid gap-4 sm:grid-cols-3">
-  {% include "partials/stat.html" with label="المديرون" value=counts.admin unit="مستخدم" icon="🛡️" tone="primary" %}
-  {% include "partials/stat.html" with label="المحاسبون" value=counts.accountant unit="مستخدم" icon="🧮" tone="info" %}
-  {% include "partials/stat.html" with label="الموظفون" value=counts.employee unit="مستخدم" icon="👤" tone="success" %}
+<div class="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {% for group in groups %}
+    {% include "partials/stat.html" with label=group.name value=group.members unit="مستخدم" icon="👥" tone="primary" %}
+  {% endfor %}
 </div>
 
 <div class="card bg-base-100 shadow-sm">
   <div class="overflow-x-auto">
     <table class="table table-sm">
       <thead>
-        <tr><th>المستخدم</th><th>اسم الدخول</th><th>الصلاحية</th><th>الحالة</th><th>آخر دخول</th><th></th></tr>
+        <tr><th>المستخدم</th><th>اسم الدخول</th><th>المجموعة</th><th>الحالة</th><th>آخر دخول</th><th></th></tr>
       </thead>
       <tbody>
         {% for u in users %}
@@ -37,10 +44,7 @@
           </td>
           <td class="nums text-xs opacity-70">{{ u.username }}</td>
           <td>
-            <span class="badge badge-sm
-              {% if u.role == 'admin' %}badge-primary{% elif u.role == 'accountant' %}badge-info{% else %}badge-ghost{% endif %}">
-              {{ u.get_role_display }}
-            </span>
+            <span class="badge badge-sm badge-primary">{{ u.group_name }}</span>
           </td>
           <td>
             <span class="badge badge-sm {% if u.is_active %}badge-success{% else %}badge-error{% endif %}">
@@ -50,8 +54,10 @@
           <td class="nums text-xs opacity-60">{{ u.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
           <td class="text-left">
             <div class="flex justify-end gap-1">
-              <a href="{% url 'user_edit' u.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
-              {% if u.pk != user.pk %}
+              {% if perms.core.edit_user %}
+                <a href="{% url 'user_edit' u.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+              {% endif %}
+              {% if perms.core.delete_user and u.pk != user.pk %}
               <form method="post" action="{% url 'user_delete' u.pk %}"
                     onsubmit="return confirm('حذف المستخدم {{ u.full_name }}؟')">
                 {% csrf_token %}
@@ -67,18 +73,19 @@
   </div>
 </div>
 
-<div class="mt-4 grid gap-3 sm:grid-cols-3">
+<div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+  {% for group in groups %}
   <div class="rounded-box border border-base-300 bg-base-100 p-4">
-    <div class="font-medium text-primary">مدير</div>
-    <p class="mt-1 text-xs opacity-70">صلاحية كاملة على كل البيانات وإدارة المستخدمين</p>
+    <div class="flex items-center justify-between">
+      <div class="font-medium text-primary">{{ group.name }}</div>
+      {% if perms.core.edit_group %}
+        <a href="{% url 'group_edit' group.pk %}" class="btn btn-ghost btn-xs">تعديل الصلاحيات</a>
+      {% endif %}
+    </div>
+    <p class="mt-1 text-xs opacity-70">
+      <span class="nums">{{ group.perm_count }}</span> صلاحية · <span class="nums">{{ group.members }}</span> مستخدم
+    </p>
   </div>
-  <div class="rounded-box border border-base-300 bg-base-100 p-4">
-    <div class="font-medium text-info">محاسب</div>
-    <p class="mt-1 text-xs opacity-70">تعديل المشاريع والموظفين والفواتير والدفعات، بدون إدارة المستخدمين</p>
-  </div>
-  <div class="rounded-box border border-base-300 bg-base-100 p-4">
-    <div class="font-medium">موظف</div>
-    <p class="mt-1 text-xs opacity-70">صفحة تسجيل ساعات العمل فقط</p>
-  </div>
+  {% endfor %}
 </div>
 {% endblock %}

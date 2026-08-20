@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from django.contrib.auth.models import Group
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils.dateparse import parse_date, parse_datetime
@@ -18,7 +19,7 @@ from django.utils import timezone
 
 from core.models import (
     Expense, ExpenseCategory, Invoice, InvoiceItem, InvoicePayment,
-    Project, ProjectPayment, ProjectStatus, ProjectType, Role, User,
+    Project, ProjectPayment, ProjectStatus, ProjectType, User,
     Worker, WorkHour,
 )
 
@@ -220,9 +221,15 @@ class Command(BaseCommand):
         except sqlite3.OperationalError:
             return 0
 
+        # الأدوار القديمة → المجموعات الافتراضية
+        role_groups = {
+            role: Group.objects.get_or_create(name=name)[0]
+            for role, name in (("admin", "مدير"), ("accountant", "محاسب"), ("employee", "موظف"))
+        }
+
         created = 0
         for r in rows:
-            role = r["role"] if r["role"] in Role.values else Role.EMPLOYEE
+            role = r["role"] if r["role"] in role_groups else "employee"
             legacy_hash = clean(r["password_hash"]) or ""
             # صيغة Django لكلمات bcrypt: "bcrypt$<hash>"
             if legacy_hash.startswith("$2"):
@@ -234,14 +241,14 @@ class Command(BaseCommand):
                 username=clean(r["username"], 50),
                 defaults={
                     "full_name": clean(r["full_name"], 100) or clean(r["username"], 100),
-                    "role": role,
                     "is_active": bool(r["is_active"]),
-                    "is_staff": role == Role.ADMIN,
-                    "is_superuser": role == Role.ADMIN,
+                    "is_staff": role == "admin",
+                    "is_superuser": role == "admin",
                     "password": password,
                     "created_at": as_datetime(r["created_at"]),
                 },
             )
+            user.groups.set([role_groups[role]])
             if r["last_login"]:
                 User.objects.filter(pk=user.pk).update(last_login=as_datetime(r["last_login"]))
             created += 1

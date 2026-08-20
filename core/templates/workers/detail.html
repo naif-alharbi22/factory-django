@@ -21,12 +21,14 @@
       </div>
     </div>
   </div>
-  {% if user.can_edit_data %}
   <div class="flex flex-wrap gap-2">
-    <button class="btn btn-sm btn-outline" onclick="hours_modal.showModal()">تسجيل ساعات</button>
-    <a href="{% url 'worker_edit' worker.pk %}" class="btn btn-sm btn-primary">تعديل</a>
+    {% if perms.core.add_work_hours %}
+      <button class="btn btn-sm btn-outline" onclick="hours_modal.showModal()">تسجيل ساعات</button>
+    {% endif %}
+    {% if perms.core.edit_worker %}
+      <a href="{% url 'worker_edit' worker.pk %}" class="btn btn-sm btn-primary">تعديل</a>
+    {% endif %}
   </div>
-  {% endif %}
 </div>
 
 <div class="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -61,7 +63,7 @@
       <div class="mt-2 max-h-[32rem] overflow-x-auto">
         <table class="table table-sm table-pin-rows">
           <thead>
-            <tr><th>التاريخ</th><th>المشروع</th><th class="text-left">عادية</th><th class="text-left">إضافية</th><th class="text-left">التكلفة</th>{% if user.can_edit_data %}<th></th>{% endif %}</tr>
+            <tr><th>التاريخ</th><th>المشروع</th><th class="text-left">عادية</th><th class="text-left">إضافية</th><th class="text-left">التكلفة</th>{% if perms.core.delete_work_hours %}<th></th>{% endif %}</tr>
           </thead>
           <tbody>
             {% for row in hours %}
@@ -75,7 +77,7 @@
               <td class="nums text-left">{{ row.regular_hours|hours }}</td>
               <td class="nums text-left">{{ row.overtime_hours|hours }}</td>
               <td class="nums text-left font-medium">{{ row.total_cost|money }}</td>
-              {% if user.can_edit_data %}
+              {% if perms.core.delete_work_hours %}
               <td class="text-left">
                 <form method="post" action="{% url 'hours_delete' row.pk %}" onsubmit="return confirm('حذف سجل الساعات؟')">
                   {% csrf_token %}
@@ -94,7 +96,7 @@
   </div>
 </div>
 
-{% if user.can_edit_data %}
+{% if perms.core.add_work_hours %}
 <dialog id="hours_modal" class="modal">
   <div class="modal-box">
     <h3 class="text-lg font-bold">تسجيل ساعات — {{ worker.name }}</h3>

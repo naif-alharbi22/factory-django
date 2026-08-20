@@ -4,8 +4,7 @@
     <div class="flex h-16 items-center justify-between gap-3">
 
       <!-- الهوية -->
-      <a href="{% if user.is_employee_only %}{% url 'my_hours' %}{% else %}{% url 'dashboard' %}{% endif %}"
-         class="flex items-center gap-3 shrink-0">
+      <a href="{{ HOME_URL }}" class="flex items-center gap-3 shrink-0">
         <div class="grid h-10 w-10 place-items-center rounded-xl bg-primary-content/15 text-xl">🏭</div>
         <div class="leading-tight">
           <div class="font-bold">نظام إدارة المصنع</div>
@@ -13,7 +12,7 @@
         </div>
       </a>
 
-      <!-- التنقل -->
+      <!-- التنقل — كل رابط حسب صلاحية قسمه -->
       {% if not user.is_employee_only %}
       <nav class="hidden items-center gap-1 md:flex">
         {% url 'dashboard' as u_dash %}
@@ -22,14 +21,24 @@
         {% url 'invoice_list' as u_inv %}
         {% url 'compare' as u_cmp %}
         {% url 'my_hours' as u_hours %}
-        <a href="{{ u_dash }}" class="btn btn-sm border-0 {% if request.path == u_dash %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الرئيسية</a>
-        <a href="{{ u_proj }}" class="btn btn-sm border-0 {% if '/projects/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">المشاريع</a>
-        <a href="{{ u_work }}" class="btn btn-sm border-0 {% if '/workers/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الموظفون</a>
-        <a href="{{ u_inv }}" class="btn btn-sm border-0 {% if '/invoices/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الفواتير</a>
-        <a href="{{ u_cmp }}" class="btn btn-sm border-0 {% if request.path == u_cmp %}bg-primary-content/25{% else %}btn-ghost{% endif %}">مقارنة</a>
+        {% if perms.core.view_dashboard %}
+          <a href="{{ u_dash }}" class="btn btn-sm border-0 {% if request.path == u_dash %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الرئيسية</a>
+        {% endif %}
+        {% if perms.core.view_projects %}
+          <a href="{{ u_proj }}" class="btn btn-sm border-0 {% if '/projects/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">المشاريع</a>
+        {% endif %}
+        {% if perms.core.view_workers %}
+          <a href="{{ u_work }}" class="btn btn-sm border-0 {% if '/workers/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الموظفون</a>
+        {% endif %}
+        {% if perms.core.view_invoices %}
+          <a href="{{ u_inv }}" class="btn btn-sm border-0 {% if '/invoices/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الفواتير</a>
+        {% endif %}
+        {% if perms.core.view_compare %}
+          <a href="{{ u_cmp }}" class="btn btn-sm border-0 {% if request.path == u_cmp %}bg-primary-content/25{% else %}btn-ghost{% endif %}">مقارنة</a>
+        {% endif %}
         <a href="{{ u_hours }}" class="btn btn-sm border-0 {% if request.path == u_hours %}bg-primary-content/25{% else %}btn-ghost{% endif %}">تحضير</a>
-        {% if user.is_admin %}
-          <a href="{% url 'user_list' %}" class="btn btn-sm border-0 {% if '/users/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">المستخدمون</a>
+        {% if perms.core.view_users or perms.core.view_groups %}
+          <a href="{% if perms.core.view_users %}{% url 'user_list' %}{% else %}{% url 'group_list' %}{% endif %}" class="btn btn-sm border-0 {% if '/users/' in request.path or '/groups/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">المستخدمون</a>
         {% endif %}
       </nav>
       {% endif %}
@@ -53,7 +62,7 @@
             <li class="menu-title">
               <span>{{ user.full_name }}</span>
             </li>
-            <li><span class="pointer-events-none justify-between">الصلاحية <span class="badge badge-sm badge-primary">{{ user.get_role_display }}</span></span></li>
+            <li><span class="pointer-events-none justify-between">المجموعة <span class="badge badge-sm badge-primary">{{ user.group_name }}</span></span></li>
             {% if not user.is_employee_only %}
               <li><a href="{% url 'my_hours' %}">تحضير الموظفين</a></li>
             {% endif %}
@@ -71,13 +80,13 @@
     <!-- تنقل الجوال -->
     {% if not user.is_employee_only %}
     <nav class="flex gap-1 overflow-x-auto pb-2 md:hidden">
-      <a href="{% url 'dashboard' %}" class="btn btn-ghost btn-xs">الرئيسية</a>
-      <a href="{% url 'project_list' %}" class="btn btn-ghost btn-xs">المشاريع</a>
-      <a href="{% url 'worker_list' %}" class="btn btn-ghost btn-xs">الموظفون</a>
-      <a href="{% url 'invoice_list' %}" class="btn btn-ghost btn-xs">الفواتير</a>
-      <a href="{% url 'compare' %}" class="btn btn-ghost btn-xs">مقارنة</a>
+      {% if perms.core.view_dashboard %}<a href="{% url 'dashboard' %}" class="btn btn-ghost btn-xs">الرئيسية</a>{% endif %}
+      {% if perms.core.view_projects %}<a href="{% url 'project_list' %}" class="btn btn-ghost btn-xs">المشاريع</a>{% endif %}
+      {% if perms.core.view_workers %}<a href="{% url 'worker_list' %}" class="btn btn-ghost btn-xs">الموظفون</a>{% endif %}
+      {% if perms.core.view_invoices %}<a href="{% url 'invoice_list' %}" class="btn btn-ghost btn-xs">الفواتير</a>{% endif %}
+      {% if perms.core.view_compare %}<a href="{% url 'compare' %}" class="btn btn-ghost btn-xs">مقارنة</a>{% endif %}
       <a href="{% url 'my_hours' %}" class="btn btn-ghost btn-xs">تحضير</a>
-      {% if user.is_admin %}<a href="{% url 'user_list' %}" class="btn btn-ghost btn-xs">المستخدمون</a>{% endif %}
+      {% if perms.core.view_users or perms.core.view_groups %}<a href="{% if perms.core.view_users %}{% url 'user_list' %}{% else %}{% url 'group_list' %}{% endif %}" class="btn btn-ghost btn-xs">المستخدمون</a>{% endif %}
     </nav>
     {% endif %}
   </div>

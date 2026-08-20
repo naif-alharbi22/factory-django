@@ -6,7 +6,7 @@
         <tr>
           <th>رقم الفاتورة</th><th>المشروع</th><th>البيان</th><th>الإصدار</th>
           <th class="text-left">الإجمالي</th><th class="text-left">المدفوع</th>
-          <th class="text-left">المتبقي</th><th>الحالة</th>{% if user.can_edit_data %}<th></th>{% endif %}
+          <th class="text-left">المتبقي</th><th>الحالة</th>{% if perms.core.edit_invoice or perms.core.delete_invoice %}<th></th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -24,15 +24,19 @@
           <td class="nums text-left text-success">{{ invoice.paid_amount|money }}</td>
           <td class="nums text-left {% if invoice.remaining > 0 %}text-warning{% endif %}">{{ invoice.remaining|money }}</td>
           <td><span class="badge badge-sm {{ invoice.status|status_badge }}">{{ invoice.get_status_display }}</span></td>
-          {% if user.can_edit_data %}
+          {% if perms.core.edit_invoice or perms.core.delete_invoice %}
           <td class="text-left">
             <div class="flex justify-end gap-1">
-              <a href="{% url 'invoice_edit' invoice.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+              {% if perms.core.edit_invoice %}
+                <a href="{% url 'invoice_edit' invoice.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+              {% endif %}
+              {% if perms.core.delete_invoice %}
               <form method="post" action="{% url 'invoice_delete' invoice.pk %}"
                     onsubmit="return confirm('حذف الفاتورة {{ invoice.invoice_number }}؟')">
                 {% csrf_token %}
                 <button class="btn btn-ghost btn-xs text-error">حذف</button>
               </form>
+              {% endif %}
             </div>
           </td>
           {% endif %}

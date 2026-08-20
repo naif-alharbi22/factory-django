@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == 'create' %}مجموعة جديدة{% else %}تعديل مجموعة{% endif %} — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl">
+  <div class="mb-5 flex items-center gap-3">
+    <a href="{% url 'group_list' %}" class="btn btn-ghost btn-sm btn-circle">→</a>
+    <h1 class="text-2xl font-bold">
+      {% if mode == 'create' %}إنشاء مجموعة جديدة{% else %}تعديل {{ group.name }}{% endif %}
+    </h1>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        {% include "partials/field.html" with field=form.name %}
+        {% if form.permissions.errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.permissions.errors.0 }}</span></div>
+        {% endif %}
+
+        <div>
+          <div class="mb-2 text-xs font-medium">صلاحيات الأقسام</div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            {% for module in modules %}
+            <div class="rounded-box border border-base-300 p-3">
+              <div class="mb-2 text-sm font-bold">{{ module.label }}</div>
+              <div class="space-y-1">
+                {% for perm in module.perms %}
+                <label class="label cursor-pointer justify-start gap-2 py-1">
+                  <input type="checkbox" name="permissions" value="{{ perm.codename }}"
+                         class="checkbox checkbox-sm checkbox-primary"
+                         {% if perm.checked %}checked{% endif %}>
+                  <span class="label-text text-xs">{{ perm.name }}</span>
+                </label>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <p class="mt-2 text-xs opacity-60">
+            مستخدم بلا أي صلاحية يرى صفحة تسجيل الساعات فقط
+          </p>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <a href="{% url 'group_list' %}" class="btn btn-ghost btn-sm">إلغاء</a>
+          <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

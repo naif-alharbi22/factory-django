@@ -27,8 +27,13 @@
         {% endif %}
 
         {% include "partials/field.html" with field=form.full_name %}
-        {% include "partials/field.html" with field=form.role %}
+        {% include "partials/field.html" with field=form.group %}
         {% include "partials/field.html" with field=form.password %}
+
+        <p class="text-xs opacity-60">
+          يرث المستخدم كل صلاحيات مجموعته تلقائياً —
+          <a href="{% url 'group_list' %}" class="link link-primary">إدارة المجموعات والصلاحيات</a>
+        </p>
 
         {% if mode == 'edit' %}
         <label class="label cursor-pointer justify-start gap-3">

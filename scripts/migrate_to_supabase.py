@@ -212,7 +212,7 @@ orphan_hours = WorkHour.objects.filter(worker__isnull=True).count()
 orphan_inv = Invoice.objects.filter(project__isnull=True).count()
 print(f"  سجلات ساعات بلا موظف : {orphan_hours}")
 print(f"  فواتير بلا مشروع     : {orphan_inv}")
-print(f"  المستخدمون: " + ", ".join(f"{u.username}({u.role})" for u in User.objects.all()))
+print(f"  المستخدمون: " + ", ".join(f"{u.username}({u.group_name})" for u in User.objects.all()))
 '''
     run([PY, "-c", rel], env=migrate_env)
 

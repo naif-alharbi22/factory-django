@@ -14,15 +14,17 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from django.contrib.auth.models import Group
+
 from .forms import (
-    ExpenseForm, InvoiceForm, LoginForm, ProjectForm, ProjectPaymentForm,
-    UserCreateForm, UserEditForm, WorkerForm, WorkHourForm,
+    ExpenseForm, GroupForm, InvoiceForm, LoginForm, ProjectForm,
+    ProjectPaymentForm, UserCreateForm, UserEditForm, WorkerForm, WorkHourForm,
 )
 from .models import (
     Expense, ExpenseCategory, Invoice, InvoiceStatus, Project, ProjectPayment,
-    ProjectStatus, ProjectType, Role, User, Worker, WorkHour,
+    ProjectStatus, ProjectType, User, Worker, WorkHour,
 )
-from .permissions import admin_only, can_edit, staff_area
+from .permissions import PERMISSION_MODULES, home_route, require_perm
 from .services import (
     ZERO, attach_costs, calc_project_cost, calc_project_costs_batch,
     dashboard_stats, next_invoice_number, project_hours_with_costs,
@@ -46,14 +48,14 @@ def _redirect_or_partial(request, fallback, partial=None, context=None):
 # ===================== الدخول والخروج =====================
 def login_view(request):
     if request.user.is_authenticated:
-        return redirect("my_hours" if request.user.is_employee_only else "dashboard")
+        return redirect(home_route(request.user))
 
     form = LoginForm(request, data=request.POST or None)
     if request.method == "POST" and form.is_valid():
         auth_login(request, form.get_user())
         user = form.get_user()
         messages.success(request, f"أهلاً بك، {user.full_name}")
-        return redirect("my_hours" if user.is_employee_only else "dashboard")
+        return redirect(home_route(user))
 
     return render(request, "auth/login.html", {"form": form})
 
@@ -67,7 +69,7 @@ def logout_view(request):
 
 # ===================== لوحة المعلومات =====================
 @login_required
-@staff_area
+@require_perm("view_dashboard")
 def dashboard(request):
     stats = dashboard_stats()
     active = list(
@@ -109,7 +111,7 @@ def _project_queryset(request):
 
 
 @login_required
-@staff_area
+@require_perm("view_projects")
 def project_list(request):
     qs, search, status, type_id = _project_queryset(request)
     paginator = Paginator(qs, PAGE_SIZE)
@@ -132,7 +134,7 @@ def project_list(request):
 
 
 @login_required
-@staff_area
+@require_perm("view_projects")
 def project_detail(request, pk):
     project = get_object_or_404(Project.objects.select_related("type"), pk=pk)
     cost = calc_project_cost(project.pk, project.budget)
@@ -166,7 +168,7 @@ def project_detail(request, pk):
 
 
 @login_required
-@can_edit
+@require_perm("add_project")
 def project_create(request):
     form = ProjectForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -177,7 +179,7 @@ def project_create(request):
 
 
 @login_required
-@can_edit
+@require_perm("edit_project")
 def project_edit(request, pk):
     project = get_object_or_404(Project, pk=pk)
     form = ProjectForm(request.POST or None, instance=project)
@@ -191,7 +193,7 @@ def project_edit(request, pk):
 
 
 @login_required
-@can_edit
+@require_perm("add_project_payment")
 @require_POST
 def project_add_payment(request, pk):
     project = get_object_or_404(Project, pk=pk)
@@ -207,7 +209,7 @@ def project_add_payment(request, pk):
 
 
 @login_required
-@can_edit
+@require_perm("add_project_expense")
 @require_POST
 def project_add_expense(request, pk):
     project = get_object_or_404(Project, pk=pk)
@@ -224,7 +226,7 @@ def project_add_expense(request, pk):
 
 # ===================== الموظفون =====================
 @login_required
-@staff_area
+@require_perm("view_workers")
 def worker_list(request):
     search = request.GET.get("search", "").strip()
     active_only = request.GET.get("active") == "1"
@@ -258,7 +260,7 @@ def worker_list(request):
 
 
 @login_required
-@staff_area
+@require_perm("view_workers")
 def worker_detail(request, pk):
     worker = get_object_or_404(Worker, pk=pk)
     rows, total_cost, total_hours = worker_hours_with_costs(worker)
@@ -275,7 +277,7 @@ def worker_detail(request, pk):
 
 
 @login_required
-@can_edit
+@require_perm("add_worker")
 def worker_create(request):
     form = WorkerForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -286,7 +288,7 @@ def worker_create(request):
 
 
 @login_required
-@can_edit
+@require_perm("edit_worker")
 def worker_edit(request, pk):
     worker = get_object_or_404(Worker, pk=pk)
     form = WorkerForm(request.POST or None, instance=worker)
@@ -300,7 +302,7 @@ def worker_edit(request, pk):
 
 
 @login_required
-@can_edit
+@require_perm("toggle_worker")
 @require_POST
 def worker_toggle_active(request, pk):
     worker = get_object_or_404(Worker, pk=pk)
@@ -314,7 +316,7 @@ def worker_toggle_active(request, pk):
 
 # ===================== ساعات العمل =====================
 @login_required
-@can_edit
+@require_perm("add_work_hours")
 @require_POST
 def hours_add(request):
     form = WorkHourForm(request.POST)
@@ -331,7 +333,7 @@ def hours_add(request):
 
 
 @login_required
-@can_edit
+@require_perm("delete_work_hours")
 @require_POST
 def hours_delete(request, pk):
     entry = get_object_or_404(WorkHour, pk=pk)
@@ -377,7 +379,7 @@ def my_hours(request):
 
 # ===================== الفواتير =====================
 @login_required
-@staff_area
+@require_perm("view_invoices")
 def invoice_list(request):
     search = request.GET.get("search", "").strip()
     status = request.GET.get("status", "").strip()
@@ -412,7 +414,7 @@ def invoice_list(request):
 
 
 @login_required
-@can_edit
+@require_perm("add_invoice")
 def invoice_create(request):
     initial = {"issue_date": timezone.localdate(), "status": InvoiceStatus.APPROVED}
     project_id = request.GET.get("project")
@@ -437,7 +439,7 @@ def invoice_create(request):
 
 
 @login_required
-@can_edit
+@require_perm("edit_invoice")
 def invoice_edit(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
     form = InvoiceForm(request.POST or None, instance=invoice)
@@ -451,7 +453,7 @@ def invoice_edit(request, pk):
 
 
 @login_required
-@can_edit
+@require_perm("delete_invoice")
 @require_POST
 def invoice_delete(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
@@ -466,7 +468,7 @@ def invoice_delete(request, pk):
 
 # ===================== المقارنة =====================
 @login_required
-@staff_area
+@require_perm("view_compare")
 def compare(request):
     ids = [int(v) for v in request.GET.getlist("ids") if v.isdigit()][:10]
     projects = []
@@ -515,22 +517,25 @@ def compare(request):
 
 # ===================== المستخدمون =====================
 @login_required
-@admin_only
+@require_perm("view_users")
 def user_list(request):
-    users = User.objects.order_by("id")
-    counts = {
-        role: User.objects.filter(role=role).count() for role, _ in Role.choices
-    }
+    users = User.objects.prefetch_related("groups").order_by("id")
+    groups = (
+        Group.objects.annotate(
+            members=Count("user", distinct=True),
+            perm_count=Count("permissions", distinct=True),
+        )
+        .order_by("name")
+    )
     return render(request, "users/list.html", {
         "users": users,
-        "counts": counts,
-        "roles": Role.choices,
+        "groups": groups,
         "create_form": UserCreateForm(),
     })
 
 
 @login_required
-@admin_only
+@require_perm("add_user")
 def user_create(request):
     form = UserCreateForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -541,7 +546,7 @@ def user_create(request):
 
 
 @login_required
-@admin_only
+@require_perm("edit_user")
 def user_edit(request, pk):
     user_obj = get_object_or_404(User, pk=pk)
     form = UserEditForm(request.POST or None, instance=user_obj)
@@ -555,7 +560,7 @@ def user_edit(request, pk):
 
 
 @login_required
-@admin_only
+@require_perm("delete_user")
 @require_POST
 def user_delete(request, pk):
     user_obj = get_object_or_404(User, pk=pk)
@@ -566,3 +571,80 @@ def user_delete(request, pk):
         user_obj.delete()
         messages.success(request, f"تم حذف المستخدم: {name}")
     return redirect("user_list")
+
+
+# ===================== المجموعات والصلاحيات =====================
+def _group_permission_modules(request, group=None):
+    """أقسام النظام وصلاحياتها مع تحديد المفعّل منها في المجموعة."""
+    if request.method == "POST":
+        selected = set(request.POST.getlist("permissions"))
+    elif group and group.pk:
+        selected = set(group.permissions.values_list("codename", flat=True))
+    else:
+        selected = set()
+    return [
+        {
+            "label": label,
+            "perms": [
+                {"codename": codename, "name": name, "checked": codename in selected}
+                for codename, name in perms
+            ],
+        }
+        for label, perms in PERMISSION_MODULES
+    ]
+
+
+@login_required
+@require_perm("view_groups")
+def group_list(request):
+    groups = (
+        Group.objects.annotate(members=Count("user", distinct=True))
+        .prefetch_related("permissions").order_by("name")
+    )
+    return render(request, "groups/list.html", {"groups": groups})
+
+
+@login_required
+@require_perm("add_group")
+def group_create(request):
+    form = GroupForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        group = form.save()
+        messages.success(request, f"تم إنشاء المجموعة: {group.name}")
+        return redirect("group_list")
+    return render(request, "groups/form.html", {
+        "form": form, "mode": "create",
+        "modules": _group_permission_modules(request),
+    })
+
+
+@login_required
+@require_perm("edit_group")
+def group_edit(request, pk):
+    group = get_object_or_404(Group, pk=pk)
+    form = GroupForm(request.POST or None, instance=group)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"تم حفظ المجموعة: {group.name}")
+        return redirect("group_list")
+    return render(request, "groups/form.html", {
+        "form": form, "mode": "edit", "group": group,
+        "modules": _group_permission_modules(request, group),
+    })
+
+
+@login_required
+@require_perm("delete_group")
+@require_POST
+def group_delete(request, pk):
+    group = get_object_or_404(Group, pk=pk)
+    if group.user_set.exists():
+        messages.error(
+            request,
+            f"لا يمكن حذف المجموعة «{group.name}» — بها مستخدمون، انقلهم لمجموعة أخرى أولاً",
+        )
+    else:
+        name = group.name
+        group.delete()
+        messages.success(request, f"تم حذف المجموعة: {name}")
+    return redirect("group_list")

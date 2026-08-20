@@ -37,7 +37,7 @@
         <span>{% if worker.id_number %}هوية: <span class="nums">{{ worker.id_number }}</span>{% else %}—{% endif %}</span>
         <div class="flex gap-1">
           <a href="{% url 'worker_detail' worker.pk %}" class="btn btn-ghost btn-xs">عرض</a>
-          {% if user.can_edit_data %}
+          {% if perms.core.edit_worker %}
             <a href="{% url 'worker_edit' worker.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
           {% endif %}
         </div>
