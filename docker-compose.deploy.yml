@@ -1,0 +1,69 @@
+# ===============================================================
+#  Deployment compose file — for panel-based Docker managers
+# ===============================================================
+#  Paste this into your VPS panel (Docker Manager, Portainer stack, ...).
+#
+#  It references a prebuilt image instead of building from source, because
+#  panels have no build context on the server. Build and push the image
+#  first — see DEPLOY.md.
+#
+#  Replace every CHANGE_ME value before deploying.
+# ===============================================================
+
+services:
+  web:
+    image: CHANGE_ME_REGISTRY/CHANGE_ME_USER/CHANGE_ME_IMAGE:latest
+    container_name: app-web
+    restart: unless-stopped
+
+    environment:
+      # ---------- Database ----------
+      # PostgreSQL connection URL. Leave empty to use the SQLite fallback
+      # stored in the sqlite-data volume.
+      DATABASE_URL: ""
+      DB_SSL_REQUIRE: "1"
+      DB_CONN_MAX_AGE: "60"
+      SQLITE_PATH: "/app/data/app.sqlite3"
+
+      # ---------- Django ----------
+      # Generate with:
+      #   python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+      DJANGO_SECRET_KEY: "CHANGE_ME_LONG_RANDOM_VALUE"
+      DJANGO_DEBUG: "0"
+      # Your domain and/or server IP, comma separated.
+      DJANGO_ALLOWED_HOSTS: "CHANGE_ME_DOMAIN_OR_IP"
+
+      # Enable these only once HTTPS terminates in front of the container.
+      # DJANGO_BEHIND_PROXY: "1"
+      # DJANGO_SECURE_COOKIES: "1"
+      # DJANGO_CSRF_TRUSTED: "https://CHANGE_ME_DOMAIN"
+
+      # ---------- Runtime ----------
+      RUN_MIGRATIONS: "1"
+      TZ: "UTC"
+
+    ports:
+      # The left-hand side is the host port. Use "127.0.0.1:8000:8000"
+      # when a reverse proxy sits in front of the app.
+      - "8000:8000"
+
+    volumes:
+      - media:/app/media
+      - sqlite-data:/app/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/login/", "-o", "/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  media:
+  sqlite-data:

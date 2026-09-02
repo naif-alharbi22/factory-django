@@ -1,303 +1,232 @@
-# نظام إدارة تكاليف المشاريع — نسخة Django
+# Project Cost Management System
 
-إعادة بناء كاملة للنظام باستخدام **Django + HTMX + DaisyUI**، مع نقل كل البيانات من النظام السابق.
+A Django web application for tracking project budgets, labour hours, invoices,
+payments and expenses, with a right-to-left Arabic interface.
+
+Built with **Django + HTMX + Tailwind CSS / DaisyUI**.
 
 ---
 
-## التشغيل السريع
+## Features
+
+- Project budgets with live cost and utilisation tracking
+- Employee records with automatic hourly and overtime rate calculation
+- Timesheet entry and labour cost roll-up per project
+- Invoices, payments and miscellaneous expenses
+- Dashboard with aggregate statistics
+- PDF reports generated server-side (no browser required)
+- Group-based permissions enforced on every route
+
+---
+
+## Quick start
 
 ```bash
-cd factory-django
+python3 -m venv .venv
+```
+
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+```bash
+.venv/bin/python manage.py migrate
+```
+
+```bash
+.venv/bin/python manage.py createsuperuser
+```
+
+```bash
 .venv/bin/python manage.py runserver 0.0.0.0:8000
 ```
 
-ثم افتح: **http://localhost:8000**
+Then open **http://localhost:8000**.
 
-| الحساب | كلمة المرور | الصلاحية |
-|---|---|---|
-| `admin` | `admin123` | مدير |
-| `accountant1` | (كما كانت في النظام السابق) | محاسب |
-| `employee1` | (كما كانت في النظام السابق) | موظف |
-
-> كلمات المرور القديمة نُقلت كما هي وتعمل بدون تغيير.
+With no `DATABASE_URL` set, the application uses a local SQLite file — no
+external services required to get running.
 
 ---
 
-## التشغيل عبر Docker مع Supabase
-
-### 1) الحصول على رابط الاتصال من Supabase
-
-من لوحة تحكم Supabase: **Project Settings ← Database ← Connection string ← URI**
-
-اختر **Session pooler** (المنفذ `5432`):
-
-```
-postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres
-```
-
-> **مهم:** الاتصال المباشر (`db.PROJECT_REF.supabase.co`) يعمل عبر IPv6 فقط في المشاريع
-> الجديدة، وقد لا يصل من شبكتك. مجمّع الجلسات (Session pooler) يعمل عبر IPv4 ويصلح
-> للترحيلات والاستيراد.
->
-> مجمّع المعاملات (المنفذ `6543`) مناسب لعدد اتصالات أكبر، والنظام يضبط نفسه له
-> تلقائياً — لكن نفّذ الترحيلات والاستيراد عبر المنفذ `5432`.
-
-### 2) إعداد ملف البيئة
+## Running with Docker
 
 ```bash
 cp .env.example .env
 ```
 
-ثم عدّل `.env` وضع فيه رابط Supabase ومفتاحاً سرياً جديداً:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(64))"
-```
-
-### 3) التشغيل
+Edit `.env`, then:
 
 ```bash
 docker compose up -d --build
 ```
 
-الترحيلات تُطبَّق تلقائياً عند الإقلاع. افتح: **http://localhost:8000**
+Migrations are applied automatically on startup. Open **http://localhost:8000**.
 
-### 4) نقل بيانات النظام القديم (مرة واحدة)
-
-أوقف النظام القديم أولاً، ثم:
+### Useful commands
 
 ```bash
-docker compose --profile tools run --rm import
+docker compose logs -f web
 ```
-
-يقرأ من `../factory-projects/server` افتراضياً. لمسار آخر:
 
 ```bash
-LEGACY_DIR=/path/to/server docker compose --profile tools run --rm import
+docker compose exec web python manage.py createsuperuser
 ```
-
-> **مهم:** يجب ربط **المجلد كاملاً** وليس ملف `.db` وحده — قاعدة البيانات القديمة
-> تعمل بوضع WAL وبياناتها موزّعة بين `factory_management.db` وملف `-wal` بجانبه.
-> الاستيراد يتحقق من ذلك ويتوقف برسالة واضحة إن كان الملف ناقصاً.
-> الملف الأصلي يُنسخ إلى مجلد مؤقت ولا يُعدَّل إطلاقاً.
-
-### أوامر مفيدة
 
 ```bash
-docker compose logs -f web          # متابعة السجلات
-docker compose restart web          # إعادة التشغيل
-docker compose down                 # إيقاف
-docker compose up -d --build        # إعادة البناء بعد تعديل الكود
-
-# أمر Django داخل الحاوية
-docker compose exec web python manage.py <command>
+docker compose restart web
 ```
 
-### ملاحظات
+```bash
+docker compose down
+```
 
-- الصورة تعمل بمستخدم غير جذري (`factory`, uid 10001).
-- الملفات الثابتة تُخدَم عبر WhiteNoise — لا حاجة لـ Nginx للتشغيل الداخلي.
-- بدون `DATABASE_URL` يعود النظام تلقائياً إلى SQLite داخل مجلد `/app/data`
-  (مخزَّن في volume) — مفيد للتجربة السريعة دون Supabase.
-- عند التشغيل خلف HTTPS أضف في `.env`:
-  `DJANGO_BEHIND_PROXY=1` و `DJANGO_SECURE_COOKIES=1` و `DJANGO_CSRF_TRUSTED=https://your-domain`
+### Notes
+
+- The image runs as a non-root user (`factory`, uid 10001).
+- Static files are served by WhiteNoise — no separate web server is needed for
+  internal use.
+- Uploaded media and the SQLite fallback database live in named volumes and
+  survive container rebuilds.
+
+For deploying to a VPS, see [DEPLOY.md](DEPLOY.md).
 
 ---
 
-## أداة Supabase CLI
+## Configuration
 
-مثبّتة في `~/.local/bin/supabase` (الإصدار 2.114.0).
+All configuration is read from environment variables (or a `.env` file).
 
-### الخطوتان المتبقيتان (نفّذهما بنفسك — تتطلبان بياناتك)
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | *(empty)* | PostgreSQL connection URL. Leave empty to use SQLite. |
+| `SQLITE_PATH` | `factory.sqlite3` | SQLite file path, used only when `DATABASE_URL` is empty. |
+| `DB_SSL_REQUIRE` | `1` | Require TLS for the database connection. |
+| `DB_CONN_MAX_AGE` | `60` | Connection reuse time in seconds. |
+| `DJANGO_SECRET_KEY` | *(dev key)* | **Must** be set to a long random value in production. |
+| `DJANGO_DEBUG` | `1` | Set to `0` in production. |
+| `DJANGO_ALLOWED_HOSTS` | `*` | Comma-separated hostnames the app will serve. |
+| `DJANGO_BEHIND_PROXY` | `0` | Set to `1` when running behind a reverse proxy terminating TLS. |
+| `DJANGO_SECURE_COOKIES` | `0` | Set to `1` when serving over HTTPS. |
+| `DJANGO_CSRF_TRUSTED` | *(empty)* | Comma-separated origins, e.g. `https://example.com`. |
+| `RUN_MIGRATIONS` | `1` | Apply migrations on container start. |
+| `APP_TITLE` | *(default title)* | Application name shown in the interface. |
+| `TZ` | `Asia/Riyadh` | Container timezone. |
 
-**1) تسجيل الدخول** — يفتح المتصفح لتفويض الحساب:
-
-```bash
-supabase login
-```
-
-بديل بدون متصفح: أنشئ رمزاً من https://supabase.com/dashboard/account/tokens ثم:
-
-```bash
-export SUPABASE_ACCESS_TOKEN=رمز-الوصول
-```
-
-(يفضَّل متغير البيئة على `supabase login --token` حتى لا يُحفظ الرمز في سجل الأوامر.)
-
-**2) ربط المشروع** — يطلب كلمة مرور قاعدة البيانات:
-
-```bash
-cd factory-django
-supabase link --project-ref PROJECT_REF
-```
-
-`PROJECT_REF` هو المعرّف في رابط لوحة التحكم:
-`https://supabase.com/dashboard/project/` **`PROJECT_REF`**
-
-للتأكد من نجاح الربط:
+Generate a secret key with:
 
 ```bash
-supabase projects list      # المشروع المرتبط مُعلَّم في عمود LINKED
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-### الحصول على رابط الاتصال لـ Django
-
-بعد الربط، من لوحة التحكم: **Connect ← Session pooler**، وانسخ الرابط إلى
-`DATABASE_URL` في ملف `.env`.
-
-### تحذير مهم
-
-**مخطط قاعدة البيانات تديره ترحيلات Django** (`core/migrations/`) وليس
-`supabase/migrations/`. لا تنفّذ هذه الأوامر على المشروع المرتبط:
-
-```
-supabase db reset --linked     ← يمحو كل البيانات
-supabase db push               ← يفرض مخططاً فارغاً
-```
-
-لتعديل المخطط: عدّل `core/models.py` ثم:
-
-```bash
-.venv/bin/python manage.py makemigrations
-.venv/bin/python manage.py migrate
-```
-
-### أوامر مفيدة بعد الربط
-
-```bash
-supabase projects list                  # قائمة المشاريع
-supabase db dump -f backup.sql --linked # نسخة احتياطية من المخطط
-supabase db dump -f data.sql --linked --data-only   # نسخة من البيانات
-supabase inspect db table-sizes --linked            # أحجام الجداول
-```
+Never commit a real `.env` file — only `.env.example` belongs in version control.
 
 ---
 
-## التثبيت من الصفر (بدون Docker)
+## Permissions
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python manage.py migrate
-.venv/bin/python manage.py import_legacy --source /path/to/factory_management.db
-```
+Enforced server-side on every route (`core/permissions.py`):
 
-### بناء ملف التنسيق (عند تعديل القوالب فقط)
-
-```bash
-npm install
-npx tailwindcss -i ./assets/app.css -o ./core/static/css/app.css --minify
-```
-
-ملف `core/static/css/app.css` مبني مسبقاً — لا حاجة لـ Node إلا عند تعديل التصميم.
-
----
-
-## الصلاحيات
-
-تُفرَض على الخادم في كل مسار (`core/permissions.py`):
-
-| الدور | الصلاحيات |
+| Group | Capabilities |
 |---|---|
-| **مدير** `admin` | كل شيء، بما فيه إدارة المستخدمين |
-| **محاسب** `accountant` | تعديل المشاريع والموظفين والفواتير والدفعات — بدون إدارة المستخدمين |
-| **موظف** `employee` | صفحة تسجيل ساعات العمل فقط |
+| **admin** | Full access, including user management |
+| **accountant** | Manage projects, employees, invoices and payments — no user management |
+| **employee** | Timesheet entry only |
 
-الوصول بدون تسجيل دخول يُحوَّل دائماً إلى صفحة الدخول.
+Unauthenticated requests are always redirected to the login page.
 
 ---
 
-## نقل البيانات من النظام القديم
-
-قاعدة بيانات النظام القديم **حيّة وتتغيّر** طالما أنه يعمل. قبل التحويل النهائي
-أوقف النظام القديم تماماً ثم أعد الاستيراد.
-
-**عبر Docker:**
-
-```bash
-docker compose --profile tools run --rm import
-```
-
-**بدون Docker:**
-
-```bash
-.venv/bin/python manage.py import_legacy \
-    --source ../factory-projects/server/factory_management.db --flush
-```
-
-`--flush` تحذف بيانات Django الحالية قبل الاستيراد. الملف القديم يُنسخ إلى مجلد
-مؤقت للقراءة ولا يُعدَّل إطلاقاً.
-
-## البنية
+## Project structure
 
 ```
-factory-django/
-├── config/           إعدادات المشروع
+.
+├── config/                   Project settings, URLs, WSGI entry point
 ├── core/
-│   ├── models.py     النماذج (مشاريع، موظفون، ساعات، فواتير، دفعات، مصروفات)
-│   ├── services.py   منطق حساب التكاليف وإحصاءات اللوحة
-│   ├── views.py      المسارات
-│   ├── permissions.py الصلاحيات
-│   ├── forms.py      نماذج الإدخال والتحقق
-│   ├── reports.py    تقارير PDF عبر WeasyPrint
-│   ├── templates/    قوالب RTL بـ DaisyUI
-│   └── management/commands/import_legacy.py
-├── assets/app.css    مصدر التنسيق (Tailwind + DaisyUI)
+│   ├── models.py             Projects, employees, hours, invoices, payments, expenses
+│   ├── services.py           Cost calculation and dashboard statistics
+│   ├── views.py              Request handlers
+│   ├── permissions.py        Access control
+│   ├── forms.py              Input forms and validation
+│   ├── reports.py            PDF report generation (WeasyPrint)
+│   └── templates/            RTL templates using DaisyUI
+├── assets/app.css            Tailwind + DaisyUI source stylesheet
+├── Dockerfile
+├── compose.yaml
 └── requirements.txt
 ```
 
 ---
 
-## معادلات حساب التكلفة
-
-منقولة حرفياً من النظام السابق ومتحقَّق من تطابقها:
+## Cost calculation
 
 ```
-تكلفة الموظفين = Σ (ساعات عادية × أجر الساعة + ساعات إضافية × الأجر الإضافي)
-                  الأجر الإضافي = المُسجَّل، وإن لم يوجد فـ 1.5 × أجر الساعة
+labour cost      = Σ (regular hours × hourly rate + overtime hours × overtime rate)
+                   overtime rate defaults to 1.5 × hourly rate when not set
 
-التكلفة الكلية  = تكلفة الموظفين + الفواتير + المصروفات
-المتبقي        = الميزانية − التكلفة الكلية
-نسبة الاستخدام  = التكلفة الكلية ÷ الميزانية × 100
+total cost       = labour cost + invoices + expenses
+remaining budget = budget − total cost
+utilisation      = total cost ÷ budget × 100
 
-الحالة: أكثر من 100% = تجاوز الميزانية · أكثر من 80% = تحذير · غير ذلك = ضمن الميزانية
+status: over 100% = over budget · over 80% = warning · otherwise = within budget
 ```
 
-عند إضافة موظف تُحسب الأجور تلقائياً (ويمكن تعديلها يدوياً):
+When an employee is created, rates are derived from the base salary and can be
+overridden manually:
 
 ```
-أجر الساعة   = (الراتب الأساسي + 1000) ÷ 26 ÷ 8
-الأجر الإضافي = الراتب الأساسي ÷ 30 ÷ 9 × 1.5
+hourly rate   = (base salary + fixed allowance of 1000) ÷ 26 ÷ 8
+overtime rate = base salary ÷ 30 ÷ 9 × 1.5
 ```
 
 ---
 
-## التشغيل على شبكة المصنع
+## Building the stylesheet
+
+The compiled stylesheet at `core/static/css/app.css` is committed, so Node is
+only needed when templates or the design change:
 
 ```bash
-.venv/bin/python manage.py runserver 0.0.0.0:8000
+npm install
 ```
-
-ثم من أي جهاز على الشبكة: `http://<عنوان-الخادم>:8000`
-
-للتشغيل الحقيقي (وليس التطوير):
 
 ```bash
-export DJANGO_DEBUG=0
-export DJANGO_SECRET_KEY="مفتاح-سري-طويل-وعشوائي"
-export DJANGO_ALLOWED_HOSTS="192.168.1.50,factory.local"
-.venv/bin/python manage.py collectstatic --noinput
+npm run build:css
 ```
 
-عند التشغيل خلف HTTPS فعّل أيضاً: `export DJANGO_SECURE_COOKIES=1`
+During development, rebuild on change:
+
+```bash
+npm run watch:css
+```
 
 ---
 
-## تقارير PDF
+## PDF reports
 
-تُنتَج عبر WeasyPrint (بدون متصفح) من صفحة أي مشروع → **تحميل التقرير PDF**.
-يعتمد على خط `Noto Kufi Arabic` المثبَّت على النظام. لتثبيته على خادم جديد:
+Reports are rendered with WeasyPrint directly from HTML templates — no headless
+browser involved. Arabic text requires Noto fonts and Pango on the host:
 
 ```bash
 sudo apt install fonts-noto-core libpango-1.0-0 libpangoft2-1.0-0
 ```
+
+These are already installed inside the Docker image.
+
+---
+
+## Running tests
+
+```bash
+.venv/bin/python manage.py test
+```
+
+---
+
+## Production checklist
+
+- [ ] `DJANGO_DEBUG=0`
+- [ ] `DJANGO_SECRET_KEY` set to a fresh random value
+- [ ] `DJANGO_ALLOWED_HOSTS` restricted to your real hostnames
+- [ ] `DJANGO_SECURE_COOKIES=1` and `DJANGO_BEHIND_PROXY=1` behind HTTPS
+- [ ] `DJANGO_CSRF_TRUSTED` set to your HTTPS origin
+- [ ] Database backups scheduled

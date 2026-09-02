@@ -2,12 +2,15 @@
 FROM node:22-slim AS css
 
 WORKDIR /build
-COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund
+
+# نثبّت أدوات البناء مباشرة بدل npm install الكامل، لتفادي تنزيل
+# ثنائيات supabase CLI (devDependency) أثناء بناء الصورة على الخادم
+RUN npm install --no-audit --no-fund --no-save \
+        tailwindcss@4 @tailwindcss/cli@4 daisyui@5
 
 COPY assets/ ./assets/
 COPY core/templates/ ./core/templates/
-RUN npx tailwindcss -i ./assets/app.css -o ./app.css --minify
+RUN npx @tailwindcss/cli -i ./assets/app.css -o ./app.css --minify
 
 
 # ===================== المرحلة 2: التشغيل =====================

@@ -12,6 +12,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from django.contrib.auth.models import Group
@@ -99,6 +100,9 @@ def _project_queryset(request):
     search = request.GET.get("search", "").strip()
     status = request.GET.get("status", "").strip()
     type_id = request.GET.get("type", "").strip()
+    # فلترة حسب تاريخ إنشاء المشروع — أي طرف فارغ يترك الحد المقابل مفتوحاً
+    date_from = parse_date(request.GET.get("date_from", "").strip())
+    date_to = parse_date(request.GET.get("date_to", "").strip())
 
     if search:
         qs = qs.filter(
@@ -110,13 +114,17 @@ def _project_queryset(request):
         qs = qs.filter(status=status)
     if type_id and type_id != "ALL":
         qs = qs.filter(type_id=type_id)
-    return qs.order_by("-id"), search, status, type_id
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+    return qs.order_by("-id"), search, status, type_id, date_from, date_to
 
 
 @login_required
 @require_perm("view_projects")
 def project_list(request):
-    qs, search, status, type_id = _project_queryset(request)
+    qs, search, status, type_id, date_from, date_to = _project_queryset(request)
     paginator = Paginator(qs, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
     attach_costs(page.object_list)
@@ -128,6 +136,8 @@ def project_list(request):
         "search": search,
         "status": status or "ALL",
         "type_id": type_id or "ALL",
+        "date_from": date_from.isoformat() if date_from else "",
+        "date_to": date_to.isoformat() if date_to else "",
         "statuses": ProjectStatus.choices,
         "types": ProjectType.objects.all(),
     }

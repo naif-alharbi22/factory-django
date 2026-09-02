@@ -17,9 +17,9 @@
 <div class="card mb-4 bg-base-100 shadow-sm">
   <div class="card-body p-4">
     <form hx-get="{% url 'project_list' %}" hx-target="#projects-table" hx-swap="outerHTML"
-          hx-trigger="submit, change from:select, keyup changed delay:400ms from:input[name=search]"
+          hx-trigger="submit, change from:select, change from:input[type=date], keyup changed delay:400ms from:input[name=search]"
           hx-push-url="true" hx-indicator="#list-loading"
-          class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          class="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
       <input type="search" name="search" value="{{ search }}" placeholder="بحث بالاسم أو العميل أو الكود"
              class="input input-bordered input-sm w-full lg:col-span-2">
       <select name="status" class="select select-bordered select-sm w-full">
@@ -34,6 +34,16 @@
           <option value="{{ t.pk }}" {% if type_id == t.pk|stringformat:"s" %}selected{% endif %}>{{ t.name }}</option>
         {% endfor %}
       </select>
+      <label class="input input-bordered input-sm flex w-full items-center gap-2"
+             title="تاريخ الإنشاء من">
+        <span class="shrink-0 text-xs opacity-60">الإنشاء من</span>
+        <input type="date" name="date_from" value="{{ date_from }}" class="grow">
+      </label>
+      <label class="input input-bordered input-sm flex w-full items-center gap-2"
+             title="تاريخ الإنشاء إلى">
+        <span class="shrink-0 text-xs opacity-60">إلى</span>
+        <input type="date" name="date_to" value="{{ date_to }}" class="grow">
+      </label>
     </form>
   </div>
 </div>

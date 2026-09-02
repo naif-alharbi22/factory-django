@@ -6,9 +6,10 @@ from django.urls import reverse
 
 from .models import (
     Manufacturing, ManufacturingPhase, ManufacturingStage, Project,
-    StageStatus, User,
+    ReportJob, ReportJobStatus, StageStatus, User,
 )
 from .permissions import ALL_CODENAMES, DEFAULT_GROUPS
+from .reports import _run_report_job
 
 
 def perm(codename):
@@ -472,3 +473,150 @@ class ProgressCalculationTests(TestCase):
             record.status = StageStatus.DONE
             record.save()
         self.assertEqual(new.progress_percent, 50)  # 2 من 4
+
+
+# ===================== تقارير المشاريع (مهمة خلفية) =====================
+class ReportJobGenerationTests(TestCase):
+    """طلب التقرير يُنشئ سجلاً فوراً دون توليد الملف داخل نفس الطلب."""
+
+    def setUp(self):
+        self.group = make_group("تقارير", ["view_reports", "view_projects"])
+        self.user = make_user("rep-user", self.group)
+        self.client.force_login(self.user)
+        self.project = Project.objects.create(name="مشروع الاختبار", budget=1000)
+
+    def test_generate_creates_queued_job(self):
+        response = self.client.post(
+            reverse("project_report_generate", args=[self.project.pk])
+        )
+        self.assertRedirects(response, reverse("project_detail", args=[self.project.pk]))
+        jobs = ReportJob.objects.filter(project=self.project)
+        self.assertEqual(jobs.count(), 1)
+        self.assertEqual(jobs.first().status, ReportJobStatus.QUEUED)
+        self.assertEqual(jobs.first().requested_by, self.user)
+
+    def test_generate_does_not_duplicate_active_job(self):
+        self.client.post(reverse("project_report_generate", args=[self.project.pk]))
+        self.client.post(reverse("project_report_generate", args=[self.project.pk]))
+        self.assertEqual(ReportJob.objects.filter(project=self.project).count(), 1)
+
+    def test_generate_allows_new_job_after_previous_finished(self):
+        old = ReportJob.objects.create(
+            project=self.project, status=ReportJobStatus.DONE,
+        )
+        self.client.post(reverse("project_report_generate", args=[self.project.pk]))
+        self.assertEqual(ReportJob.objects.filter(project=self.project).count(), 2)
+        self.assertTrue(ReportJob.objects.filter(pk=old.pk, status=ReportJobStatus.DONE).exists())
+
+    def test_generate_requires_permission(self):
+        # صلاحية أخرى غير فارغة حتى لا يُحوَّل كموظف بلا صلاحيات (302) بل يُرفض (403)
+        outsider = make_user("no-perm", make_group("بلا تقارير", ["view_projects"]))
+        self.client.force_login(outsider)
+        response = self.client.post(
+            reverse("project_report_generate", args=[self.project.pk])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ReportJob.objects.filter(project=self.project).exists())
+
+
+class ReportJobWorkerTests(TestCase):
+    """الدالة المنفَّذة في الخيط الخلفي تبني PDF فعلياً وتُحدّث حالة الطلب."""
+
+    def setUp(self):
+        self.user = make_user("worker-user", make_group("تنفيذ", ["view_reports"]))
+        self.project = Project.objects.create(name="مشروع PDF", budget=5000)
+
+    def test_run_report_job_produces_pdf_and_marks_done(self):
+        job = ReportJob.objects.create(project=self.project, requested_by=self.user)
+        _run_report_job(job.pk)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ReportJobStatus.DONE)
+        self.assertIsNotNone(job.started_at)
+        self.assertIsNotNone(job.finished_at)
+        self.assertTrue(job.file.name)
+        with job.file.open("rb") as fh:
+            self.assertTrue(fh.read(5).startswith(b"%PDF"))
+        job.file.delete(save=False)
+
+    def test_run_report_job_missing_job_is_a_noop(self):
+        _run_report_job(999999)  # لا يوجد بهذا المعرّف — لا يجب أن يفشل
+
+
+class ReportJobStatusAndDownloadTests(TestCase):
+    """جزء الاستطلاع (HTMX) ورابط التحميل يطابقان حالة الطلب الفعلية."""
+
+    def setUp(self):
+        self.user = make_user("status-user", make_group("حالة", ["view_reports"]))
+        self.client.force_login(self.user)
+        self.project = Project.objects.create(name="مشروع الحالة", budget=100)
+
+    def test_status_with_no_job_offers_generate_button(self):
+        response = self.client.get(
+            reverse("project_report_status", args=[self.project.pk])
+        )
+        self.assertContains(response, "إنشاء تقرير PDF")
+        self.assertNotContains(response, "hx-trigger")
+
+    def test_status_while_running_keeps_polling(self):
+        ReportJob.objects.create(project=self.project, status=ReportJobStatus.RUNNING)
+        response = self.client.get(
+            reverse("project_report_status", args=[self.project.pk])
+        )
+        self.assertContains(response, "جارٍ إنشاء التقرير")
+        self.assertContains(response, "hx-trigger=\"every 2s\"")
+
+    def test_download_blocked_until_done(self):
+        job = ReportJob.objects.create(project=self.project, status=ReportJobStatus.QUEUED)
+        response = self.client.get(
+            reverse("project_report_download", args=[self.project.pk, job.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_download_serves_finished_file(self):
+        job = ReportJob.objects.create(project=self.project)
+        _run_report_job(job.pk)
+        job.refresh_from_db()
+
+        response = self.client.get(
+            reverse("project_report_download", args=[self.project.pk, job.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        job.file.delete(save=False)
+
+
+# ===================== فلترة المشاريع بتاريخ الإنشاء =====================
+class ProjectDateFilterTests(TestCase):
+    def setUp(self):
+        self.user = make_user("date-user", make_group("عرض المشاريع", ["view_projects"]))
+        self.client.force_login(self.user)
+        self.old = Project.objects.create(name="مشروع قديم")
+        Project.objects.filter(pk=self.old.pk).update(created_at="2024-01-10T00:00:00Z")
+        self.new = Project.objects.create(name="مشروع جديد")
+        Project.objects.filter(pk=self.new.pk).update(created_at="2026-06-01T00:00:00Z")
+
+    def test_filters_by_creation_date_range(self):
+        response = self.client.get(
+            reverse("project_list"), {"date_from": "2025-01-01", "date_to": "2025-12-31"}
+        )
+        names = {p.name for p in response.context["projects"]}
+        self.assertEqual(names, set())
+
+        response = self.client.get(reverse("project_list"), {"date_from": "2026-01-01"})
+        names = {p.name for p in response.context["projects"]}
+        self.assertEqual(names, {"مشروع جديد"})
+
+        response = self.client.get(reverse("project_list"), {"date_to": "2024-12-31"})
+        names = {p.name for p in response.context["projects"]}
+        self.assertEqual(names, {"مشروع قديم"})
+
+    def test_invalid_date_is_ignored_not_an_error(self):
+        response = self.client.get(reverse("project_list"), {"date_from": "not-a-date"})
+        self.assertEqual(response.status_code, 200)
+        names = {p.name for p in response.context["projects"]}
+        self.assertEqual(names, {"مشروع قديم", "مشروع جديد"})
+
+    def test_project_detail_shows_creation_date(self):
+        response = self.client.get(reverse("project_detail", args=[self.new.pk]))
+        self.assertContains(response, "تاريخ الإنشاء")

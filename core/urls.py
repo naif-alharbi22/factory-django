@@ -28,7 +28,9 @@ urlpatterns = [
     path("projects/<int:pk>/edit/", views.project_edit, name="project_edit"),
     path("projects/<int:pk>/payments/add/", views.project_add_payment, name="project_add_payment"),
     path("projects/<int:pk>/expenses/add/", views.project_add_expense, name="project_add_expense"),
-    path("projects/<int:pk>/report.pdf", reports.project_report_pdf, name="project_report"),
+    path("projects/<int:pk>/report/generate/", reports.project_report_generate, name="project_report_generate"),
+    path("projects/<int:pk>/report/status/", reports.project_report_status, name="project_report_status"),
+    path("projects/<int:pk>/report/<int:job_id>/download/", reports.project_report_download, name="project_report_download"),
 
     path("workers/", views.worker_list, name="worker_list"),
     path("workers/new/", views.worker_create, name="worker_create"),

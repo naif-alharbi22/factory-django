@@ -586,3 +586,51 @@ class ManufacturingStageRecord(models.Model):
             and self.status != StageStatus.DONE
             and self.blocked_by is None
         )
+
+
+# ===================== التقارير =====================
+class ReportJobStatus(models.TextChoices):
+    QUEUED = "queued", "قيد الانتظار"
+    RUNNING = "running", "جارٍ الإنشاء"
+    DONE = "done", "جاهز"
+    FAILED = "failed", "فشل"
+
+
+class ReportJob(models.Model):
+    """طلب إنشاء تقرير PDF لمشروع.
+
+    التوليد الفعلي يُنفَّذ في خيط خلفي (انظر core/reports.py) حتى لا يبقى
+    طلب المستخدم منتظراً ولا يُشغل عامل الخادم طوال مدة التوليد — الصفحة
+    تستطلع حالة الطلب دورياً (HTMX) وتعرض رابط التحميل فور الاكتمال.
+    """
+
+    project = models.ForeignKey(
+        Project, verbose_name="المشروع", on_delete=models.CASCADE,
+        related_name="report_jobs",
+    )
+    status = models.CharField(
+        "الحالة", max_length=10, choices=ReportJobStatus.choices,
+        default=ReportJobStatus.QUEUED,
+    )
+    file = models.FileField("الملف", upload_to="reports/%Y/%m/", blank=True, null=True)
+    error_message = models.TextField("رسالة الخطأ", blank=True, null=True)
+    requested_by = models.ForeignKey(
+        User, verbose_name="طلبه", on_delete=models.SET_NULL,
+        blank=True, null=True, related_name="report_jobs",
+    )
+    created_at = models.DateTimeField("تاريخ الطلب", default=timezone.now)
+    started_at = models.DateTimeField("بدأ التنفيذ", blank=True, null=True)
+    finished_at = models.DateTimeField("انتهى", blank=True, null=True)
+
+    class Meta:
+        verbose_name = "طلب تقرير"
+        verbose_name_plural = "طلبات التقارير"
+        ordering = ["-id"]
+        indexes = [models.Index(fields=["project", "status"])]
+
+    def __str__(self):
+        return f"تقرير {self.project.name} — {self.get_status_display()}"
+
+    @property
+    def is_active(self):
+        return self.status in (ReportJobStatus.QUEUED, ReportJobStatus.RUNNING)

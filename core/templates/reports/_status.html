@@ -1,0 +1,48 @@
+<!-- جزء HTMX: حالة تقرير المشروع. يُستطلَع دورياً أثناء التوليد فقط. -->
+<div id="report-widget"
+     {% if job and job.is_active %}
+       hx-get="{% url 'project_report_status' project.pk %}"
+       hx-trigger="every 2s"
+       hx-swap="outerHTML"
+     {% endif %}>
+  {% if not job %}
+    <form method="post" action="{% url 'project_report_generate' project.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline">إنشاء تقرير PDF</button>
+    </form>
+
+  {% elif job.status == "queued" %}
+    <span class="btn btn-sm btn-outline btn-disabled gap-2">
+      <span class="loading loading-spinner loading-xs"></span> بانتظار بدء التوليد…
+    </span>
+
+  {% elif job.status == "running" %}
+    <span class="btn btn-sm btn-outline btn-disabled gap-2">
+      <span class="loading loading-spinner loading-xs"></span> جارٍ إنشاء التقرير…
+    </span>
+
+  {% elif job.status == "done" %}
+    <div class="flex items-center gap-2">
+      <a href="{% url 'project_report_download' project.pk job.pk %}" class="btn btn-sm btn-success">
+        تحميل التقرير PDF
+      </a>
+      <form method="post" action="{% url 'project_report_generate' project.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-ghost btn-xs" title="توليد نسخة محدّثة من التقرير">
+          تحديث التقرير
+        </button>
+      </form>
+    </div>
+
+  {% elif job.status == "failed" %}
+    <div class="flex items-center gap-2">
+      <span class="badge badge-error badge-sm" title="{{ job.error_message|default:'' }}">
+        تعذّر إنشاء التقرير
+      </span>
+      <form method="post" action="{% url 'project_report_generate' project.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-sm btn-outline btn-error">إعادة المحاولة</button>
+      </form>
+    </div>
+  {% endif %}
+</div>
