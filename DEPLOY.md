@@ -55,7 +55,21 @@ docker compose -f compose.prod.yml up -d
 The `.env` file must sit next to it — the container will not start without the
 Supabase connection details.
 
-### 4. Confirm it is watching
+### 4. Make every compose command target this file
+
+Two compose files sit in the directory, and a bare `docker compose ...` picks
+`compose.yaml` — the one that builds from source and does not know about the
+Caddy and Watchtower containers. Running `docker compose down` that way removes
+the web container and then fails with *Network ... Resource is still in use*,
+because the containers it does not know about are still attached.
+
+Add this line to `.env` once, and every plain command targets the right file:
+
+```
+COMPOSE_FILE=compose.prod.yml
+```
+
+### 5. Confirm it is watching
 
 ```bash
 docker logs factory-watchtower
