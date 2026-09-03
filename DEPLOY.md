@@ -64,6 +64,18 @@ docker logs factory-watchtower
 A line reporting that it is scanning one container means the label matched. From
 here on, every push to `main` reaches the server within a couple of minutes.
 
+If instead it repeats:
+
+```
+Error response from daemon: client version 1.25 is too old.
+Minimum supported API version is 1.40
+```
+
+then Watchtower cannot reach Docker at all and nothing will ever update. It
+still defaults to API version 1.25, which daemons from Engine 29 on reject;
+`DOCKER_API_VERSION` in `compose.prod.yml` pins a version they accept. Make
+sure you are running the current file (`git pull`).
+
 To follow a deployment as it lands:
 
 ```bash
