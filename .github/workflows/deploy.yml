@@ -39,6 +39,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # The templates use ManifestStaticFilesStorage, which resolves {% static %}
+      # through staticfiles/staticfiles.json. That manifest is generated, not
+      # committed, so without this step every view test fails with
+      # "Missing staticfiles manifest entry". The Dockerfile does the same.
+      - name: Collect static files
+        env:
+          USE_SQLITE: "1"
+          DJANGO_SECRET_KEY: ci-only-key-not-used-in-production
+        run: python manage.py collectstatic --noinput
+
       # USE_SQLITE keeps the suite off Supabase; settings.py does this by
       # default under `manage.py test`, and it is set here to be explicit.
       - name: Run tests

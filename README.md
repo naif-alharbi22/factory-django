@@ -92,6 +92,23 @@ A per-user time zone can be added later without touching any stored data: keep
 this value as the fallback and call `timezone.activate(<user zone>)` for the
 duration of the request.
 
+### Running the tests
+
+```bash
+.venv/bin/python manage.py collectstatic --noinput
+```
+
+```bash
+.venv/bin/python manage.py test core
+```
+
+The suite runs on local SQLite by itself, so it never touches Supabase. The
+`collectstatic` step is needed once on a fresh clone: Django forces
+`DEBUG=False` during tests, and `ManifestStaticFilesStorage` then resolves
+`{% static %}` through `staticfiles/staticfiles.json`, which is generated
+rather than committed. Without it every view test fails with *Missing
+staticfiles manifest entry*. Re-run it after changing `assets/app.css`.
+
 ### Language in the code
 
 Everything developer-facing — comments, docstrings, log lines, CLI output and
