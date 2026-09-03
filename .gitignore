@@ -11,3 +11,12 @@ node_modules/
 # Supabase
 supabase/.temp/
 supabase/.branches/
+
+# Database exports never belong in the repository: they carry employee ID
+# numbers, salaries, addresses, customer records and password hashes. Keep the
+# directory itself so the tooling has somewhere to write.
+backups/*
+!backups/README.md
+*.sql
+*.dump
+!core/migrations/*.sql
