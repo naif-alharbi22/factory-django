@@ -82,8 +82,20 @@
 
 body { font-family: var(--font-sans); }
 
-/* Latin digits inside financial tables, for readability */
-.nums { font-variant-numeric: tabular-nums; direction: ltr; display: inline-block; }
+/* Latin digits and dates, for readability in financial tables.
+   Two things this deliberately does NOT do:
+   - no `display`: the class lands on <td> elements too, and giving a table
+     cell display:inline-block drops it out of the table layout, so the column
+     stops lining up with its header;
+   - no `direction: ltr`: that would also flip the cell's text alignment, and
+     would reverse mixed content such as a count followed by its Arabic noun.
+   `plaintext` takes the direction from the content itself, so "2026-08-18
+   09:56" reads left-to-right while an Arabic label stays right-to-left. */
+.nums { font-variant-numeric: tabular-nums; unicode-bidi: plaintext; }
+
+/* Status pills sit in narrow columns; let the column widen instead of
+   breaking a two-word status label across lines. */
+.table .badge { white-space: nowrap; }
 
 /* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
