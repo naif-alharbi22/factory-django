@@ -158,9 +158,10 @@ docker compose down
 - Uploaded media lives in a named volume and survives container rebuilds; the
   application data itself lives in Supabase.
 
-Deployment is automatic: every push to `main` runs the tests, builds the image
-on GitHub's runners and publishes it to GHCR, and a Watchtower container on the
-VPS picks it up within a couple of minutes. See [DEPLOY.md](DEPLOY.md) for that
+Every pull request runs the tests, checks for missing migrations and builds the
+container image without publishing it. Merging to `main` repeats those checks,
+publishes the image to GHCR, and a Watchtower container on the VPS picks it up
+within a couple of minutes. See [DEPLOY.md](DEPLOY.md) for that
 setup and for the two manual paths.
 
 ---
