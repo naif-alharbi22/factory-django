@@ -1,0 +1,73 @@
+# Production stack for the VPS — automatic deployment.
+#
+# Nothing is built here: the image is built by GitHub Actions on every push to
+# main (.github/workflows/deploy.yml) and published to GHCR. Watchtower below
+# watches that tag and replaces the running container as soon as a new image
+# appears, applying migrations through the usual entrypoint.
+#
+# Start it once:
+#   docker compose -f compose.prod.yml up -d
+#
+# From then on, pushing to main is the whole deployment.
+#
+# Requires a .env file next to this one — see .env.example.
+
+services:
+  web:
+    image: ghcr.io/naif-alharbi22/factory-django:latest
+    container_name: factory-web
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-0}"
+      RUN_MIGRATIONS: "${RUN_MIGRATIONS:-1}"
+      # Display zone only; timestamps are stored in UTC either way.
+      DISPLAY_TIME_ZONE: "${DISPLAY_TIME_ZONE:-Asia/Riyadh}"
+      # Container clock, for log timestamps.
+      TZ: "${TZ:-UTC}"
+    ports:
+      # Use "127.0.0.1:8000:8000" once a reverse proxy sits in front.
+      - "${WEB_PORT:-8000}:8000"
+    volumes:
+      # Application data lives in Supabase; only uploads are on disk.
+      - media:/app/media
+    labels:
+      # Watchtower only touches containers carrying this label.
+      com.centurylinklabs.watchtower.enable: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/login/", "-o", "/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: factory-watchtower
+    restart: unless-stopped
+    volumes:
+      # Read-only is enough to inspect, pull and recreate containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Only labelled containers, so nothing else on this host is touched.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # How often GHCR is checked for a new digest, in seconds.
+      WATCHTOWER_POLL_INTERVAL: "${WATCHTOWER_INTERVAL:-120}"
+      # Delete the image that was replaced, so the disk does not fill up.
+      WATCHTOWER_CLEANUP: "true"
+      TZ: "${TZ:-UTC}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  media:

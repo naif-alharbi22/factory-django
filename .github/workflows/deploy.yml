@@ -1,0 +1,79 @@
+# Build the image on every push to main and publish it to GHCR.
+#
+# The VPS never builds anything: Watchtower there watches this image tag and
+# pulls the new one within a couple of minutes (see compose.prod.yml).
+#
+# The test job gates the build — a commit whose tests fail is never published,
+# so a broken build cannot reach production on its own. Delete the `needs:`
+# line below to publish without that gate.
+name: Build and publish image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push supersedes one still building.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # WeasyPrint's runtime libraries: the report tests build a real PDF.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8 fonts-noto-core
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # USE_SQLITE keeps the suite off Supabase; settings.py does this by
+      # default under `manage.py test`, and it is set here to be explicit.
+      - name: Run tests
+        env:
+          USE_SQLITE: "1"
+          DJANGO_SECRET_KEY: ci-only-key-not-used-in-production
+        run: python manage.py test core
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # lets GITHUB_TOKEN push to GHCR — no PAT needed
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          # :latest is what Watchtower follows; the sha tag lets you roll back
+          # to an exact commit.
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

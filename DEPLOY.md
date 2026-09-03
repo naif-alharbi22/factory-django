@@ -1,11 +1,95 @@
 # Deploying to a VPS
 
-The application ships as a single container image. Two deployment paths are
-described below — pick whichever matches your host.
+The application ships as a single container image. Three deployment paths are
+described below — pick whichever matches your host. The first one deploys on
+its own after the initial setup; the other two are manual.
 
 ---
 
-## Path A — Panel-based Docker managers (recommended)
+## Path A — Automatic, on every push (recommended)
+
+Pushing to `main` is the entire deployment. Nothing is built on the VPS and no
+SSH key is stored anywhere.
+
+- [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs the test
+  suite, then builds the image on GitHub's runners and publishes it to GHCR as
+  `ghcr.io/naif-alharbi22/factory-django:latest`. Tests gate the build, so a
+  commit that breaks them is never published.
+- [`compose.prod.yml`](compose.prod.yml) runs the app on the VPS from that
+  image, alongside a Watchtower container that checks the tag every two minutes
+  and replaces the running container when the digest changes. Migrations run on
+  the new container's start, as they always do.
+
+### 1. Push the workflow
+
+```bash
+git push origin main
+```
+
+Watch the run under the repository's **Actions** tab. The first one takes a few
+minutes; later runs reuse the build cache.
+
+### 2. Make the package public
+
+The first push creates the GHCR package as **private**. On the repository page
+open **Packages → factory-django → Package settings → Change visibility →
+Public**, so the VPS can pull without credentials.
+
+Keeping it private also works, but then the VPS needs `docker login ghcr.io`
+with a token that has `read:packages`.
+
+### 3. Start the stack on the VPS, once
+
+```bash
+cd /docker/factory-django
+```
+
+```bash
+git pull
+```
+
+```bash
+docker compose -f compose.prod.yml up -d
+```
+
+The `.env` file must sit next to it — the container will not start without the
+Supabase connection details.
+
+### 4. Confirm it is watching
+
+```bash
+docker logs factory-watchtower
+```
+
+A line reporting that it is scanning one container means the label matched. From
+here on, every push to `main` reaches the server within a couple of minutes.
+
+To follow a deployment as it lands:
+
+```bash
+docker logs -f factory-web
+```
+
+### Rolling back
+
+Every build is also tagged with its commit SHA. To pin the previous one, replace
+the `image:` line in `compose.prod.yml` with that tag and run
+`docker compose -f compose.prod.yml up -d`. Remember to put `:latest` back
+afterwards, or Watchtower will have nothing to follow.
+
+### Tuning
+
+`WATCHTOWER_INTERVAL` in `.env` changes the polling period in seconds (default
+`120`). Watchtower only touches containers carrying the
+`com.centurylinklabs.watchtower.enable` label, so anything else on the host is
+left alone.
+
+---
+
+## Path B — Panel-based Docker managers
+
+Use this when you would rather drive deployments from a control panel than
+from GitHub.
 
 Most VPS control panels (Hostinger's Docker Manager, Portainer stacks, Coolify
 and similar) deploy from a **`docker-compose.yml` file only**. They run
@@ -82,7 +166,7 @@ docker compose pull && docker compose up -d
 
 ---
 
-## Path B — Build on the server over SSH
+## Path C — Build on the server over SSH
 
 Simpler if you would rather not use a registry. Containers started this way
 still appear in your panel's Docker view.
@@ -104,7 +188,7 @@ docker compose up -d --build
 ```
 
 > Building the image needs roughly 1 GB of free memory. On small VPS plans the
-> build may be killed — use Path A instead and build on your own machine.
+> build may be killed — use Path A or B instead and build elsewhere.
 
 Make sure every change is committed and pushed before deploying this way, or the
 server will build an outdated version.
