@@ -11,10 +11,13 @@ its own after the initial setup; the other two are manual.
 Pushing to `main` is the entire deployment. Nothing is built on the VPS and no
 SSH key is stored anywhere.
 
-- [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs the test
-  suite, then builds the image on GitHub's runners and publishes it to GHCR as
-  `ghcr.io/naif-alharbi22/factory-django:latest`. Tests gate the build, so a
-  commit that breaks them is never published.
+- [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs the
+  checks and publishes the image. On a **pull request** it runs the test suite,
+  verifies no migration is missing, and builds the image without pushing it —
+  so a change is proven before it is merged. On a **push to main** it does the
+  same and then publishes to GHCR as
+  `ghcr.io/naif-alharbi22/factory-django:latest`. Tests gate the build either
+  way, so a commit that breaks them is never published.
 - [`compose.prod.yml`](compose.prod.yml) runs the app on the VPS from that
   image, alongside a Watchtower container that checks the tag every two minutes
   and replaces the running container when the digest changes. Migrations run on

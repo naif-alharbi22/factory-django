@@ -1,25 +1,28 @@
-# Build the image on every push to main and publish it to GHCR.
+# Checks run on every pull request; publishing happens only on main.
 #
-# The VPS never builds anything: Watchtower there watches this image tag and
-# pulls the new one within a couple of minutes (see compose.prod.yml).
+#   pull request  ->  tests + migration check + a full image build (not pushed)
+#   push to main  ->  the same, then the image is published to GHCR
 #
-# The test job gates the build — a commit whose tests fail is never published,
-# so a broken build cannot reach production on its own. Delete the `needs:`
-# line below to publish without that gate.
-name: Build and publish image
+# So a change is proven before it is merged, not after. The VPS never builds
+# anything: Watchtower there watches the published tag and pulls the new image
+# within a couple of minutes (see compose.prod.yml).
+name: Checks and publish
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
 
-# A newer push supersedes one still building.
+# A newer commit supersedes a run still in progress on the same branch or PR.
 concurrency:
-  group: publish-${{ github.ref }}
+  group: checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +52,14 @@ jobs:
           DJANGO_SECRET_KEY: ci-only-key-not-used-in-production
         run: python manage.py collectstatic --noinput
 
+      # Catches a model edited without its migration — which would otherwise
+      # only surface as a runtime error after deployment.
+      - name: Check for missing migrations
+        env:
+          USE_SQLITE: "1"
+          DJANGO_SECRET_KEY: ci-only-key-not-used-in-production
+        run: python manage.py makemigrations --check --dry-run
+
       # USE_SQLITE keeps the suite off Supabase; settings.py does this by
       # default under `manage.py test`, and it is set here to be explicit.
       - name: Run tests
@@ -58,6 +69,9 @@ jobs:
         run: python manage.py test core
 
   publish:
+    # On a pull request this job still builds the image, so a broken Dockerfile
+    # is caught before merging; it just does not push the result.
+    name: Build image (published on main)
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -68,7 +82,10 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # Skipped for pull requests: nothing is pushed, so no credentials are
+      # needed, and a fork's token could not sign in anyway.
       - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -79,7 +96,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           # :latest is what Watchtower follows; the sha tag lets you roll back
           # to an exact commit.
           tags: |
