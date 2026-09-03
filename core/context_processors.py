@@ -5,7 +5,7 @@ from .permissions import home_route
 
 
 def app_meta(request):
-    """بيانات عامة متاحة في كل القوالب."""
+    """Shared values made available to every template."""
     user = getattr(request, "user", None)
     if user is not None and user.is_authenticated:
         home_url = reverse(home_route(user))

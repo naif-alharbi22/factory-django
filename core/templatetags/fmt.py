@@ -1,4 +1,4 @@
-"""مرشّحات العرض."""
+"""Display filters."""
 
 from decimal import Decimal, InvalidOperation
 
@@ -10,7 +10,7 @@ register = template.Library()
 
 @register.filter
 def money(value, decimals=2):
-    """تنسيق مبلغ بفواصل الآلاف."""
+    """Format an amount with thousands separators."""
     if value is None or value == "":
         return "0"
     try:
@@ -30,7 +30,7 @@ def money0(value):
 
 @register.filter
 def hours(value):
-    """تنسيق الساعات بدون أصفار زائدة."""
+    """Format hours without trailing zeros."""
     if value is None:
         return "0"
     try:
@@ -57,7 +57,7 @@ def pct(value):
 
 @register.filter
 def bar_width(value, scale):
-    """عرض شريط نسبي (0-100%) بأمان ضد القسمة على صفر."""
+    """Relative bar width (0-100%), guarded against division by zero."""
     try:
         value = Decimal(str(value or 0))
         scale = Decimal(str(scale or 0))
@@ -71,7 +71,7 @@ def bar_width(value, scale):
 
 @register.filter
 def status_badge(status):
-    """لون شارة حالة المشروع."""
+    """Badge colour for a project status."""
     mapping = {
         "IN_PROGRESS": "badge-info",
         "APPROVAL": "badge-warning",

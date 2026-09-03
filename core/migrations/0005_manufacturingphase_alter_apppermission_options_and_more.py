@@ -5,14 +5,16 @@ import django.utils.timezone
 from django.db import migrations, models
 
 
-"""وحدة التصنيع: نماذج سير العمل القابل للتهيئة + صلاحياته + البيانات الأولية.
+"""Manufacturing module: configurable workflow models, permissions and seeds.
 
-البذور الافتراضية (قابلة للتعديل لاحقاً من الواجهة دون أي تغيير في الكود):
+The default seed data below can be changed from the interface later without
+any code change:
     التصنيع: قص، تجميع
     التنفيذ النهائي: تركيب، تسليم
 """
 
-# صلاحيات قسمي التصنيع الجديدين — نسخة ثابتة وقت كتابة الترحيل
+# Permissions for the two new manufacturing modules — a frozen copy taken
+# when this migration was written
 OPERATIONAL_PERMS = [
     ("view_manufacturing", "عرض متابعة التصنيع"),
     ("add_manufacturing", "إنشاء متابعة تصنيع لمشروع"),
@@ -30,7 +32,7 @@ CONFIG_PERMS = [
     ("reorder_manufacturing", "إعادة ترتيب مراحل وخطوات التصنيع"),
 ]
 
-# سير العمل الافتراضي — بيانات أولية فقط، لا يعتمد عليها أي منطق برمجي
+# The default workflow — seed data only; no logic depends on these values
 DEFAULT_WORKFLOW = [
     ("التصنيع", 1, [("قص", 1), ("تجميع", 2)]),
     ("التنفيذ النهائي", 2, [("تركيب", 1), ("تسليم", 2)]),
@@ -38,9 +40,11 @@ DEFAULT_WORKFLOW = [
 
 
 def seed_manufacturing(apps, schema_editor):
-    """إنشاء الصلاحيات وإسنادها للمجموعات الافتراضية + بذر سير العمل.
+    """Create the permissions, grant them to the default groups, seed the
+    workflow.
 
-    الدالة idempotent: تعتمد get_or_create فلا تُنشئ مكررات عند إعادة التنفيذ.
+    Idempotent: it goes through get_or_create, so re-running creates no
+    duplicates.
     """
     ContentType = apps.get_model("contenttypes", "ContentType")
     Permission = apps.get_model("auth", "Permission")
@@ -58,7 +62,8 @@ def seed_manufacturing(apps, schema_editor):
         )
         created[codename] = perm
 
-    # مدير: كل صلاحيات التصنيع — محاسب: التشغيلية فقط (بدون التهيئة)
+    # مدير gets every manufacturing permission; محاسب only the operational
+    # ones, not the configuration
     admin_group = Group.objects.filter(name="مدير").first()
     if admin_group:
         admin_group.permissions.add(*created.values())

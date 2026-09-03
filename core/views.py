@@ -1,4 +1,7 @@
-"""مسارات النظام."""
+"""Views.
+
+Flash messages and page text are user-facing, so they stay Arabic.
+"""
 
 from decimal import Decimal
 
@@ -43,13 +46,13 @@ def _is_htmx(request):
 
 
 def _redirect_or_partial(request, fallback, partial=None, context=None):
-    """يعيد جزءاً من الصفحة لطلبات HTMX أو يحوّل لصفحة كاملة."""
+    """Return a page fragment for HTMX requests, or redirect to a full page."""
     if _is_htmx(request) and partial:
         return render(request, partial, context or {})
     return redirect(fallback)
 
 
-# ===================== الدخول والخروج =====================
+# ===================== Sign in and out =====================
 def login_view(request):
     if request.user.is_authenticated:
         return redirect(home_route(request.user))
@@ -71,7 +74,7 @@ def logout_view(request):
     return redirect("login")
 
 
-# ===================== لوحة المعلومات =====================
+# ===================== Dashboard =====================
 @login_required
 @require_perm("view_dashboard")
 def dashboard(request):
@@ -94,13 +97,13 @@ def dashboard(request):
     })
 
 
-# ===================== المشاريع =====================
+# ===================== Projects =====================
 def _project_queryset(request):
     qs = Project.objects.select_related("type")
     search = request.GET.get("search", "").strip()
     status = request.GET.get("status", "").strip()
     type_id = request.GET.get("type", "").strip()
-    # فلترة حسب تاريخ إنشاء المشروع — أي طرف فارغ يترك الحد المقابل مفتوحاً
+    # Filter on the project creation date; an empty side leaves that end open
     date_from = parse_date(request.GET.get("date_from", "").strip())
     date_to = parse_date(request.GET.get("date_to", "").strip())
 
@@ -237,7 +240,7 @@ def project_add_expense(request, pk):
     return redirect("project_detail", pk=project.pk)
 
 
-# ===================== الموظفون =====================
+# ===================== Workers =====================
 @login_required
 @require_perm("view_workers")
 def worker_list(request):
@@ -327,7 +330,7 @@ def worker_toggle_active(request, pk):
     return redirect(request.META.get("HTTP_REFERER") or reverse("worker_list"))
 
 
-# ===================== ساعات العمل =====================
+# ===================== Timesheets =====================
 @login_required
 @require_perm("add_work_hours")
 @require_POST
@@ -356,10 +359,10 @@ def hours_delete(request, pk):
     return redirect(request.META.get("HTTP_REFERER") or reverse("worker_detail", args=[worker_id]))
 
 
-# ===================== صفحة الموظف =====================
+# ===================== Employee page =====================
 @login_required
 def my_hours(request):
-    """صفحة تسجيل الساعات — متاحة لكل الأدوار، وهي الصفحة الوحيدة للموظف."""
+    """Timesheet page — open to every role, and the only page an employee has."""
     today = timezone.localdate()
     form = WorkHourForm(request.POST or None, initial={"date": today})
 
@@ -390,7 +393,7 @@ def my_hours(request):
     })
 
 
-# ===================== الفواتير =====================
+# ===================== Invoices =====================
 @login_required
 @require_perm("view_invoices")
 def invoice_list(request):
@@ -479,7 +482,7 @@ def invoice_delete(request, pk):
     return redirect("invoice_list")
 
 
-# ===================== المقارنة =====================
+# ===================== Comparison =====================
 @login_required
 @require_perm("view_compare")
 def compare(request):
@@ -528,7 +531,7 @@ def compare(request):
     return render(request, "compare/index.html", context)
 
 
-# ===================== المستخدمون =====================
+# ===================== Users =====================
 @login_required
 @require_perm("view_users")
 def user_list(request):
@@ -586,9 +589,9 @@ def user_delete(request, pk):
     return redirect("user_list")
 
 
-# ===================== المجموعات والصلاحيات =====================
+# ===================== Groups and permissions =====================
 def _group_permission_modules(request, group=None):
-    """أقسام النظام وصلاحياتها مع تحديد المفعّل منها في المجموعة."""
+    """The permission modules, marking which ones the group already has."""
     if request.method == "POST":
         selected = set(request.POST.getlist("permissions"))
     elif group and group.pk:
@@ -663,7 +666,7 @@ def group_delete(request, pk):
     return redirect("group_list")
 
 
-# ===================== التصنيع =====================
+# ===================== Manufacturing =====================
 @login_required
 @require_perm("view_manufacturing")
 def manufacturing_list(request):
@@ -756,9 +759,9 @@ def manufacturing_record_note(request, pk):
     return redirect("manufacturing_detail", pk=record.manufacturing_id)
 
 
-# ===================== إعدادات مراحل التصنيع =====================
+# ===================== Manufacturing workflow settings =====================
 def _renumber(siblings, moving=None, direction=None):
-    """يعيد ترقيم القائمة تسلسلياً، وينقل عنصراً خطوة واحدة إن طُلب."""
+    """Renumber a list sequentially, optionally moving one item by one place."""
     items = list(siblings)
     if moving is not None:
         index = next(i for i, item in enumerate(items) if item.pk == moving.pk)
@@ -881,7 +884,7 @@ def stage_edit(request, pk):
     if request.method == "POST" and form.is_valid():
         form.save()
         if stage.phase_id != old_phase_id:
-            # إعادة ترقيم المرحلة الأصلية بعد نقل الخطوة منها
+            # Renumber the original phase after moving the stage out of it
             _renumber(
                 ManufacturingStage.objects.filter(phase_id=old_phase_id)
                 .order_by("order", "id")

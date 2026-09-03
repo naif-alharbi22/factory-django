@@ -4,7 +4,7 @@
   themes: factory --default, factorydark --prefersdark;
 }
 
-/* ===== هوية النظام: أزرق مؤسسي مع تحديث عصري ===== */
+/* ===== Brand identity: corporate blue, modernised ===== */
 @plugin "daisyui/theme" {
   name: "factory";
   default: true;
@@ -75,16 +75,16 @@
   --noise: 0;
 }
 
-/* ===== الخطوط العربية ===== */
+/* ===== Arabic fonts ===== */
 @theme {
   --font-sans: "Noto Kufi Arabic", "Cairo", "Segoe UI", system-ui, sans-serif;
 }
 
 body { font-family: var(--font-sans); }
 
-/* أرقام إنجليزية داخل الجداول المالية لسهولة القراءة */
+/* Latin digits inside financial tables, for readability */
 .nums { font-variant-numeric: tabular-nums; direction: ltr; display: inline-block; }
 
-/* مؤشر تحميل HTMX */
+/* HTMX loading indicator */
 .htmx-indicator { opacity: 0; transition: opacity 150ms ease-in; }
 .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { opacity: 1; }

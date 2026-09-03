@@ -1,6 +1,6 @@
-"""استيراد بيانات النظام القديم (Node/SQLite) إلى قاعدة بيانات Django.
+"""Import legacy system data (Node/SQLite) into the Django database.
 
-الاستخدام:
+Usage:
     python manage.py import_legacy --source /path/to/factory_management.db
 """
 
@@ -27,7 +27,7 @@ VALID_PROJECT_STATUS = set(ProjectStatus.values)
 
 
 def dec(value, default="0"):
-    """تحويل أي قيمة رقمية قادمة من SQLite إلى Decimal بأمان."""
+    """Safely turn any numeric value coming from SQLite into a Decimal."""
     if value is None or value == "":
         value = default
     try:
@@ -37,7 +37,7 @@ def dec(value, default="0"):
 
 
 def dec_rate(value, allow_none=False):
-    """أجور الساعة تُنقل بدقتها الكاملة دون تقريب."""
+    """Hourly rates carry over at full precision, without rounding."""
     if value is None or value == "":
         return None if allow_none else Decimal("0")
     try:
@@ -86,8 +86,8 @@ def clean(value, limit=None):
     return text[:limit] if limit else text
 
 
-# أعمدة يجب أن تكون موجودة؛ بعضها أُضيف عبر ترحيلات النظام القديم
-# وقد تكون مسجّلة في ملف -wal دون دمجها بعد في الملف الأساسي.
+# Columns that must exist. Some were added by the legacy system's own
+# migrations and may live in the -wal file, not yet merged into the main one.
 REQUIRED_COLUMNS = {
     "workers": ["employee_number", "insurance_amount"],
     "projects": ["client_email", "address"],
@@ -96,13 +96,13 @@ REQUIRED_COLUMNS = {
 
 
 def verify_schema(con, source):
-    """التأكد من اكتمال المخطط قبل بدء الاستيراد."""
+    """Check the schema is complete before starting the import."""
     missing = []
     for table, columns in REQUIRED_COLUMNS.items():
         try:
             present = {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}
         except sqlite3.OperationalError:
-            missing.append(f"{table} (الجدول نفسه مفقود)")
+            missing.append(f"{table} (the table itself is missing)")
             continue
         for column in columns:
             if column not in present:
@@ -113,25 +113,26 @@ def verify_schema(con, source):
         hint = ""
         if not wal.exists():
             hint = (
-                "\n\nالسبب الأرجح: ملف السجل المؤقت "
-                f"«{wal.name}» غير موجود بجانب قاعدة البيانات.\n"
-                "انسخ أو اربط المجلد كاملاً (وليس ملف .db وحده)، مثلاً في Docker:\n"
+                "\n\nMost likely cause: the write-ahead log file "
+                f"'{wal.name}' is not next to the database.\n"
+                "Copy or mount the whole directory, not just the .db file — "
+                "in Docker:\n"
                 "    -v /path/to/server:/legacy:ro"
             )
         raise CommandError(
-            "مخطط قاعدة البيانات القديمة ناقص، الأعمدة المفقودة: "
+            "The legacy database schema is incomplete. Missing columns: "
             + ", ".join(missing) + hint
         )
 
 
 @contextmanager
 def open_legacy(source):
-    """فتح قاعدة البيانات القديمة عبر نسخة مؤقتة.
+    """Open the legacy database through a temporary copy.
 
-    القاعدة القديمة تعمل بوضع WAL، وفتحها مباشرةً للقراءة فقط قد يفشل
-    لأن SQLite يحتاج صلاحية الكتابة على ملفي -wal و -shm. النسخ يضمن
-    قراءة كل البيانات المُثبَّتة (بما فيها ما لم يُدمج بعد في الملف
-    الأساسي) دون المساس بالملف الأصلي إطلاقاً.
+    The legacy database runs in WAL mode, and opening it read-only can fail
+    because SQLite needs write access to the -wal and -shm files. Copying
+    guarantees every committed row is read (including what has not been merged
+    into the main file yet) without touching the original at all.
     """
     with tempfile.TemporaryDirectory(prefix="factory-legacy-") as tmp:
         target = Path(tmp) / "legacy.db"
@@ -151,23 +152,23 @@ def open_legacy(source):
 
 
 class Command(BaseCommand):
-    help = "استيراد بيانات النظام القديم من ملف SQLite"
+    help = "Import legacy system data from a SQLite file"
 
     def add_arguments(self, parser):
-        parser.add_argument("--source", required=True, help="مسار ملف قاعدة البيانات القديمة")
+        parser.add_argument("--source", required=True, help="Path to the legacy database file")
         parser.add_argument(
             "--flush", action="store_true",
-            help="حذف البيانات الحالية قبل الاستيراد",
+            help="Delete existing data before importing",
         )
 
     def handle(self, *args, **options):
         source = Path(options["source"]).expanduser().resolve()
         if not source.exists():
-            raise CommandError(f"لم يتم العثور على الملف: {source}")
+            raise CommandError(f"File not found: {source}")
 
         with open_legacy(source) as con, transaction.atomic():
             if options["flush"]:
-                self.stdout.write("حذف البيانات الحالية...")
+                self.stdout.write("Deleting existing data...")
                 for model in (WorkHour, InvoicePayment, InvoiceItem, Invoice,
                               ProjectPayment, Expense, Project, Worker,
                               ProjectType, ExpenseCategory):
@@ -175,24 +176,24 @@ class Command(BaseCommand):
                 User.objects.filter(is_superuser=False).delete()
 
             counts = {}
-            counts["أنواع المشاريع"] = self.import_project_types(con)
-            counts["تصنيفات المصروفات"] = self.import_expense_categories(con)
-            counts["المستخدمون"] = self.import_users(con)
-            counts["المشاريع"] = self.import_projects(con)
-            counts["الموظفون"] = self.import_workers(con)
-            counts["ساعات العمل"] = self.import_work_hours(con)
-            counts["الفواتير"] = self.import_invoices(con)
-            counts["بنود الفواتير"] = self.import_invoice_items(con)
-            counts["دفعات الفواتير"] = self.import_invoice_payments(con)
-            counts["دفعات المشاريع"] = self.import_project_payments(con)
-            counts["المصروفات"] = self.import_expenses(con)
+            counts["Project types"] = self.import_project_types(con)
+            counts["Expense categories"] = self.import_expense_categories(con)
+            counts["Users"] = self.import_users(con)
+            counts["Projects"] = self.import_projects(con)
+            counts["Workers"] = self.import_workers(con)
+            counts["Work hours"] = self.import_work_hours(con)
+            counts["Invoices"] = self.import_invoices(con)
+            counts["Invoice items"] = self.import_invoice_items(con)
+            counts["Invoice payments"] = self.import_invoice_payments(con)
+            counts["Project payments"] = self.import_project_payments(con)
+            counts["Expenses"] = self.import_expenses(con)
 
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS("تم الاستيراد بنجاح:"))
+        self.stdout.write(self.style.SUCCESS("Import finished:"))
         for label, n in counts.items():
             self.stdout.write(f"  {label:<22} {n}")
 
-    # ---------- المراجع ----------
+    # ---------- Reference data ----------
     def import_project_types(self, con):
         rows = con.execute("SELECT * FROM project_types").fetchall()
         ProjectType.objects.bulk_create(
@@ -213,15 +214,15 @@ class Command(BaseCommand):
         )
         return len(rows)
 
-    # ---------- المستخدمون ----------
+    # ---------- Users ----------
     def import_users(self, con):
-        """نقل المستخدمين مع الحفاظ على كلمات المرور (bcrypt من bcryptjs)."""
+        """Move users across, keeping their passwords (bcrypt from bcryptjs)."""
         try:
             rows = con.execute("SELECT * FROM app_users").fetchall()
         except sqlite3.OperationalError:
             return 0
 
-        # الأدوار القديمة → المجموعات الافتراضية
+        # Legacy roles map onto the default groups (group names are data)
         role_groups = {
             role: Group.objects.get_or_create(name=name)[0]
             for role, name in (("admin", "مدير"), ("accountant", "محاسب"), ("employee", "موظف"))
@@ -231,11 +232,11 @@ class Command(BaseCommand):
         for r in rows:
             role = r["role"] if r["role"] in role_groups else "employee"
             legacy_hash = clean(r["password_hash"]) or ""
-            # صيغة Django لكلمات bcrypt: "bcrypt$<hash>"
+            # Django's format for bcrypt passwords: "bcrypt$<hash>"
             if legacy_hash.startswith("$2"):
                 password = f"bcrypt${legacy_hash}"
             else:
-                password = "!"  # كلمة مرور غير قابلة للاستخدام
+                password = "!"  # unusable password
 
             user, made = User.objects.update_or_create(
                 username=clean(r["username"], 50),
@@ -254,7 +255,7 @@ class Command(BaseCommand):
             created += 1
         return created
 
-    # ---------- المشاريع ----------
+    # ---------- Projects ----------
     def import_projects(self, con):
         rows = con.execute("SELECT * FROM projects").fetchall()
         type_ids = set(ProjectType.objects.values_list("id", flat=True))
@@ -281,7 +282,7 @@ class Command(BaseCommand):
         Project.objects.bulk_create(objs, batch_size=500)
         return len(objs)
 
-    # ---------- الموظفون ----------
+    # ---------- Workers ----------
     def import_workers(self, con):
         rows = con.execute("SELECT * FROM workers").fetchall()
         objs = []
@@ -334,11 +335,11 @@ class Command(BaseCommand):
         WorkHour.objects.bulk_create(objs, batch_size=1000)
         if skipped:
             self.stdout.write(self.style.WARNING(
-                f"  تم تخطي {skipped} سجل ساعات عمل (موظف غير موجود أو تاريخ غير صالح)"
+                f"  Skipped {skipped} work-hour rows (unknown worker or invalid date)"
             ))
         return len(objs)
 
-    # ---------- الفواتير ----------
+    # ---------- Invoices ----------
     def import_invoices(self, con):
         rows = con.execute("SELECT * FROM invoices").fetchall()
         project_ids = set(Project.objects.values_list("id", flat=True))
@@ -366,7 +367,7 @@ class Command(BaseCommand):
             ))
         Invoice.objects.bulk_create(objs, batch_size=500)
         if skipped:
-            self.stdout.write(self.style.WARNING(f"  تم تخطي {skipped} فاتورة بدون تاريخ إصدار"))
+            self.stdout.write(self.style.WARNING(f"  Skipped {skipped} invoices with no issue date"))
         return len(objs)
 
     def import_invoice_items(self, con):

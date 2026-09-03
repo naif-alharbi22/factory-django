@@ -1,4 +1,7 @@
-"""نماذج الإدخال."""
+"""Input forms.
+
+Field labels and choices are user-facing, so they stay Arabic.
+"""
 
 from decimal import Decimal
 
@@ -18,7 +21,7 @@ BASE_TEXTAREA = "textarea textarea-bordered w-full"
 
 
 def _style(fields, widget_map=None):
-    """توحيد أنماط DaisyUI على حقول النموذج."""
+    """Apply consistent DaisyUI styling to a form's fields."""
     for name, field in fields.items():
         widget = field.widget
         if isinstance(widget, forms.CheckboxInput):
@@ -92,7 +95,7 @@ class WorkerForm(StyledModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # تُحسب تلقائياً في الواجهة من الراتب، وتبقى قابلة للتعديل يدوياً
+        # Derived from the salary in the browser, still editable by hand
         self.fields["hourly_rate"].widget.attrs.update({"step": "0.0001", "data-rate": "hourly"})
         self.fields["overtime_rate"].widget.attrs.update({"step": "0.0001", "data-rate": "overtime"})
         self.fields["base_salary"].widget.attrs.update({"step": "0.01", "data-rate": "salary"})
@@ -255,7 +258,7 @@ class UserEditForm(StyledModelForm):
 
 
 class GroupForm(StyledModelForm):
-    """مجموعة صلاحيات — الاسم مع اختيار حر لصلاحيات كل قسم."""
+    """A permission group — its name plus a free choice of module permissions."""
 
     permissions = forms.MultipleChoiceField(
         label="الصلاحيات", required=False,
@@ -292,7 +295,7 @@ class GroupForm(StyledModelForm):
 
 
 class ManufacturingCreateForm(forms.Form):
-    """إنشاء متابعة تصنيع — المشاريع التي لا متابعة لها فقط."""
+    """Start a manufacturing tracker — only projects without one are listed."""
 
     project = forms.ModelChoiceField(
         label="المشروع",
@@ -317,8 +320,8 @@ class ManufacturingPhaseForm(StyledModelForm):
 
 
 class ManufacturingStageForm(StyledModelForm):
-    """خطوة تصنيع — تغيير حقل المرحلة ينقل الخطوة بين المراحل بأمان
-    (سجلات التصنيع التاريخية تبقى مرتبطة بالخطوة نفسها)."""
+    """A manufacturing stage — changing the phase field moves the stage safely
+    between phases (historical records stay attached to the same stage)."""
 
     class Meta:
         model = ManufacturingStage

@@ -54,7 +54,11 @@ Paste the contents of `docker-compose.deploy.yml` into your panel, after
 replacing every value marked `CHANGE_ME`:
 
 - `image` — the tag you pushed in step 2
-- `DATABASE_URL` — your database connection URL, or leave empty for SQLite
+- `DATABASE_URL` — the Supabase connection string (*Project Settings →
+  Database → Connection string*, transaction pooler, port `6543`). Instead of
+  a URL you may set `SUPABASE_PROJECT_REF`, `SUPABASE_DB_REGION` and
+  `SUPABASE_DB_PASSWORD` and let the app build it. The container will not
+  start without one of the two.
 - `DJANGO_SECRET_KEY` — generate with:
   ```bash
   python3 -c "import secrets; print(secrets.token_urlsafe(64))"
@@ -91,7 +95,9 @@ git clone YOUR_REPOSITORY_URL /opt/app && cd /opt/app
 cp .env.example .env && nano .env
 ```
 
-Fill in `DATABASE_URL`, `DJANGO_SECRET_KEY` and `DJANGO_ALLOWED_HOSTS`, then:
+Fill in the Supabase connection details (`DATABASE_URL`, or
+`SUPABASE_PROJECT_REF` + `SUPABASE_DB_PASSWORD`), `DJANGO_SECRET_KEY` and
+`DJANGO_ALLOWED_HOSTS`, then:
 
 ```bash
 docker compose up -d --build
@@ -118,10 +124,20 @@ Once a reverse proxy (Nginx, Caddy, or your provider's) terminates TLS:
    ```yaml
    DJANGO_BEHIND_PROXY: "1"
    DJANGO_SECURE_COOKIES: "1"
-   DJANGO_CSRF_TRUSTED: "https://your-domain.example"
+   ```
+3. Add the domain to `DJANGO_ALLOWED_HOSTS`:
+   ```yaml
+   DJANGO_ALLOWED_HOSTS: "your-domain.example,www.your-domain.example"
    ```
 
-Skipping `DJANGO_CSRF_TRUSTED` will cause form submissions to be rejected.
+CSRF trusted origins are derived from `DJANGO_ALLOWED_HOSTS`, so the domain only
+needs adding in one place. Set `DJANGO_CSRF_TRUSTED` explicitly only when the
+public URL differs from the hostname the container sees — behind a proxy that
+rewrites the `Host` header, for example. Values there must include the scheme.
+
+If a domain is missing from `DJANGO_ALLOWED_HOSTS`, requests to it return
+**HTTP 400** rather than a Django error page — check that first when a new
+domain does not work.
 
 ---
 
@@ -158,8 +174,13 @@ docker compose exec web sh
 - Migrations run on every container start by default. If you scale to more than
   one replica, set `RUN_MIGRATIONS=0` and run migrations once as a separate
   step, so concurrent containers do not race each other.
-- Uploaded media and the SQLite fallback database live in named volumes. Back
-  these up along with your database.
+- Application data lives in Supabase — back it up there (*Project Settings →
+  Database → Backups*). Uploaded media lives in a named Docker volume and needs
+  backing up separately.
+- The container refuses to start when the Supabase connection details are
+  missing, and `entrypoint.sh` waits up to `DB_WAIT_SECONDS` (60 by default)
+  for the database to answer before giving up. Both cases are visible in
+  `docker compose logs web`.
 - The container exposes a health check on the login page; panels that read
   Docker health status will show the service as unhealthy if the app stops
   responding.

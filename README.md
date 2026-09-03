@@ -30,6 +30,13 @@ python3 -m venv .venv
 ```
 
 ```bash
+cp .env.example .env
+```
+
+Fill in the Supabase connection details — see [Database](#database) below; the
+application will not start without them. Then:
+
+```bash
 .venv/bin/python manage.py migrate
 ```
 
@@ -43,8 +50,54 @@ python3 -m venv .venv
 
 Then open **http://localhost:8000**.
 
-With no `DATABASE_URL` set, the application uses a local SQLite file — no
-external services required to get running.
+### Database
+
+The application runs on **Supabase (PostgreSQL)** and reads its connection
+details from the environment — there is no silent fallback to a local file. If
+they are missing, startup stops with a message naming what to set.
+
+Copy `.env.example` to `.env` and fill in **one** of these:
+
+- `DATABASE_URL` — the full connection string from Supabase
+  (*Project Settings → Database → Connection string*, transaction pooler,
+  port `6543`), or
+- `SUPABASE_PROJECT_REF`, `SUPABASE_DB_REGION` and `SUPABASE_DB_PASSWORD` —
+  the URL is assembled from them and the password is percent-encoded for you.
+
+`./scripts/set-db-password.sh` writes the password into `.env` without echoing
+it to the screen or the shell history.
+
+Run migrations through the session pooler (port `5432`), which is what
+`DIRECT_DATABASE_URL` holds:
+
+```bash
+DATABASE_URL="$DIRECT_DATABASE_URL" .venv/bin/python manage.py migrate
+```
+
+For offline development, `USE_SQLITE=1` runs against a local SQLite file
+instead. The test suite switches to SQLite on its own, so tests never touch the
+Supabase project.
+
+### Dates and times
+
+Timestamps are **stored in UTC** and **displayed in Asia/Riyadh**.
+
+`USE_TZ` is on, so every `DateTimeField` is timezone-aware and the database
+connection runs in UTC — rows hold UTC wherever the server sits. `TIME_ZONE`
+only decides what pages, PDF reports and form defaults convert to, and it is
+set from `DISPLAY_TIME_ZONE` (default `Asia/Riyadh`; an unknown zone name stops
+startup rather than silently falling back).
+
+A per-user time zone can be added later without touching any stored data: keep
+this value as the fallback and call `timezone.activate(<user zone>)` for the
+duration of the request.
+
+### Language in the code
+
+Everything developer-facing — comments, docstrings, log lines, CLI output and
+error messages — is written in English. Everything user-facing stays Arabic:
+templates, field labels (`verbose_name`), choice labels, flash messages, and
+data rows such as the default group names.
 
 ---
 
@@ -85,8 +138,8 @@ docker compose down
 - The image runs as a non-root user (`factory`, uid 10001).
 - Static files are served by WhiteNoise — no separate web server is needed for
   internal use.
-- Uploaded media and the SQLite fallback database live in named volumes and
-  survive container rebuilds.
+- Uploaded media lives in a named volume and survives container rebuilds; the
+  application data itself lives in Supabase.
 
 For deploying to a VPS, see [DEPLOY.md](DEPLOY.md).
 
@@ -98,19 +151,26 @@ All configuration is read from environment variables (or a `.env` file).
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | *(empty)* | PostgreSQL connection URL. Leave empty to use SQLite. |
-| `SQLITE_PATH` | `factory.sqlite3` | SQLite file path, used only when `DATABASE_URL` is empty. |
+| `DATABASE_URL` | *(empty)* | Supabase connection URL (transaction pooler, port `6543`). Required unless the `SUPABASE_*` variables below are set. |
+| `DIRECT_DATABASE_URL` | *(derived)* | Session-pooler URL (port `5432`) for migrations and imports. |
+| `SUPABASE_PROJECT_REF` | *(empty)* | Project reference ID; used to build the URL when `DATABASE_URL` is empty. |
+| `SUPABASE_DB_PASSWORD` | *(empty)* | Database password; percent-encoded automatically. |
+| `SUPABASE_DB_REGION` | `us-east-1` | Region in the pooler hostname, e.g. `ap-northeast-1`. |
+| `SUPABASE_DB_HOST` / `_PORT` / `_USER` / `_NAME` | *(derived)* | Overrides for a self-hosted or non-standard Supabase setup. |
+| `USE_SQLITE` | `0` | `1` runs on local SQLite instead of Supabase. Defaults to `1` while running tests. |
+| `SQLITE_PATH` | `factory.sqlite3` | SQLite file path, used only when `USE_SQLITE=1`. |
 | `DB_SSL_REQUIRE` | `1` | Require TLS for the database connection. |
 | `DB_CONN_MAX_AGE` | `60` | Connection reuse time in seconds. |
 | `DJANGO_SECRET_KEY` | *(dev key)* | **Must** be set to a long random value in production. |
 | `DJANGO_DEBUG` | `1` | Set to `0` in production. |
-| `DJANGO_ALLOWED_HOSTS` | `*` | Comma-separated hostnames the app will serve. |
+| `DJANGO_ALLOWED_HOSTS` | `*` | Comma-separated hostnames the app will serve. See [Allowed domains](#allowed-domains). |
 | `DJANGO_BEHIND_PROXY` | `0` | Set to `1` when running behind a reverse proxy terminating TLS. |
 | `DJANGO_SECURE_COOKIES` | `0` | Set to `1` when serving over HTTPS. |
-| `DJANGO_CSRF_TRUSTED` | *(empty)* | Comma-separated origins, e.g. `https://example.com`. |
+| `DJANGO_CSRF_TRUSTED` | *(derived)* | Overrides the origins derived from `DJANGO_ALLOWED_HOSTS`. Must include the scheme. |
 | `RUN_MIGRATIONS` | `1` | Apply migrations on container start. |
 | `APP_TITLE` | *(default title)* | Application name shown in the interface. |
-| `TZ` | `Asia/Riyadh` | Container timezone. |
+| `DISPLAY_TIME_ZONE` | `Asia/Riyadh` | Time zone shown to users. Storage is always UTC. |
+| `TZ` | `UTC` | Container clock, used for log timestamps only. |
 
 Generate a secret key with:
 
@@ -119,6 +179,38 @@ python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
 Never commit a real `.env` file — only `.env.example` belongs in version control.
+Empty values are treated as unset, so the defaults above apply.
+
+### Allowed domains
+
+`DJANGO_ALLOWED_HOSTS` controls which hostnames the application answers to.
+A request arriving with any other `Host` header is rejected with **HTTP 400**.
+
+```bash
+DJANGO_ALLOWED_HOSTS=example.com,www.example.com,203.0.113.10
+```
+
+| Form | Matches |
+|---|---|
+| `example.com` | that exact hostname |
+| `.example.com` | `example.com` and every subdomain of it |
+| `203.0.113.10` | requests addressed to that IP |
+| `*` | any host — fine locally, not recommended in production |
+
+Rules:
+
+- Hostname only — no scheme, no port, no trailing slash.
+- Spaces after commas are ignored, so `example.com, www.example.com` works.
+- Add every name users actually type. `example.com` and `www.example.com` are
+  two different hosts; listing only one rejects the other.
+
+**CSRF origins are derived from this list automatically**, so adding a domain in
+one place is enough. Set `DJANGO_CSRF_TRUSTED` only when the public URL differs
+from the hostname the container sees — values there must include the scheme
+(`https://example.com`).
+
+With `DJANGO_SECURE_COOKIES=1` the derived origins are `https://` only;
+otherwise both `http://` and `https://` are trusted.
 
 ---
 

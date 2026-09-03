@@ -1,4 +1,8 @@
-"""نماذج نظام إدارة تكاليف المشاريع."""
+"""Models for the project cost management system.
+
+Field labels (verbose_name) and choice labels are user-facing, so they stay
+Arabic like the rest of the interface.
+"""
 
 from decimal import Decimal
 
@@ -10,17 +14,18 @@ from . import permissions as permissions_registry
 
 MONEY = {"max_digits": 14, "decimal_places": 2}
 HOURS = {"max_digits": 7, "decimal_places": 2}
-# أجور الساعة محسوبة بالقسمة (مثال: 2700 ÷ 208 ساعة) فتُحفظ بدقة عالية
-# حتى تطابق التكاليف الناتجة النظام السابق إلى الهللة.
+# Hourly rates come out of a division (e.g. 2700 / 208 hours), so they are
+# stored at high precision to match the legacy system's costs to the halala.
 RATE = {"max_digits": 18, "decimal_places": 10}
 
 
-# ===================== المستخدمون والصلاحيات =====================
+# ===================== Users and permissions =====================
 class AppPermission(models.Model):
-    """نموذج بلا جدول — يحمل صلاحيات أقسام النظام في auth.Permission.
+    """Table-less model that carries the module permissions in auth.Permission.
 
-    السجل الفعلي للصلاحيات في core/permissions.py (PERMISSION_MODULES)،
-    وتُنشأ صفوف auth.Permission تلقائياً بعد الترحيلات (post_migrate).
+    The real registry lives in core/permissions.py (PERMISSION_MODULES); the
+    auth.Permission rows are created automatically after migrations
+    (post_migrate).
     """
 
     class Meta:
@@ -68,10 +73,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return f"{self.full_name} ({self.username})"
 
-    # صلاحيات النظام — تُشتق من مجموعة المستخدم (auth.Group)
+    # Application permissions are derived from the user's group (auth.Group)
     @property
     def group(self):
-        """مجموعة المستخدم — يُسنَد كل مستخدم لمجموعة واحدة."""
+        """The user's group — every user is assigned to exactly one."""
         return self.groups.first()
 
     @property
@@ -83,13 +88,13 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def is_employee_only(self):
-        """بدون أي صلاحيات أقسام — صفحته الوحيدة تسجيل الساعات."""
+        """No module permissions at all — the timesheet is their only page."""
         if self.is_superuser:
             return False
         return not self.get_all_permissions()
 
 
-# ===================== المراجع =====================
+# ===================== Reference data =====================
 class ProjectType(models.Model):
     name = models.CharField("النوع", max_length=100)
     description = models.TextField("الوصف", blank=True, null=True)
@@ -116,7 +121,7 @@ class ExpenseCategory(models.Model):
         return self.name
 
 
-# ===================== المشاريع =====================
+# ===================== Projects =====================
 class ProjectStatus(models.TextChoices):
     PLANNING = "PLANNING", "تخطيط"
     APPROVAL = "APPROVAL", "قيد الموافقة"
@@ -166,7 +171,7 @@ class Project(models.Model):
         return ProjectStatus(self.status).label if self.status in ProjectStatus.values else self.status
 
 
-# ===================== الموظفون =====================
+# ===================== Workers =====================
 class Worker(models.Model):
     name = models.CharField("الاسم", max_length=150)
     employee_number = models.CharField("الرقم الوظيفي", max_length=30, blank=True, null=True)
@@ -198,14 +203,14 @@ class Worker(models.Model):
 
     @property
     def effective_overtime_rate(self):
-        """أجر الساعة الإضافية، وإن لم يُحدَّد فهو 1.5 من أجر الساعة."""
+        """Overtime rate; when unset it is 1.5x the hourly rate."""
         if self.overtime_rate is not None:
             return self.overtime_rate
         return (self.hourly_rate or Decimal("0")) * Decimal("1.5")
 
     @property
     def salary_with_allowances(self):
-        """الراتب شاملاً البدلات (بدل ثابت 1000 كما في النظام السابق)."""
+        """Salary including allowances (a flat 1000, as in the legacy system)."""
         return (self.base_salary or Decimal("0")) + Decimal("1000")
 
 
@@ -250,7 +255,7 @@ class WorkHour(models.Model):
         return self.regular_cost + self.overtime_cost
 
 
-# ===================== الفواتير =====================
+# ===================== Invoices =====================
 class InvoiceStatus(models.TextChoices):
     DRAFT = "DRAFT", "مسودة"
     APPROVED = "APPROVED", "معتمدة"
@@ -340,7 +345,7 @@ class InvoicePayment(models.Model):
         return f"{self.amount}"
 
 
-# ===================== الدفعات والمصروفات =====================
+# ===================== Payments and expenses =====================
 class PaymentStatus(models.TextChoices):
     CONFIRMED = "confirmed", "مؤكدة"
     PENDING = "pending", "معلّقة"
@@ -400,9 +405,10 @@ class Expense(models.Model):
     def __str__(self):
         return self.title
 
-# ===================== التصنيع =====================
-# سير عمل التصنيع محرّك قابل للتهيئة بالكامل: المراحل والخطوات سجلات في
-# قاعدة البيانات تُدار من الواجهة، ولا يعتمد أي منطق على أسمائها أو عددها.
+# ===================== Manufacturing =====================
+# The manufacturing workflow is a fully configurable engine: phases and stages
+# are database rows managed from the interface, and no logic depends on their
+# names or on how many there are.
 class ManufacturingPhase(models.Model):
     name = models.CharField("الاسم", max_length=100)
     description = models.TextField("الوصف", blank=True, null=True)
@@ -448,7 +454,8 @@ class StageStatus(models.TextChoices):
 
 
 class Manufacturing(models.Model):
-    """متابعة تصنيع مشروع — لقطة من الخطوات المهيّأة وقت الإنشاء."""
+    """A project's manufacturing tracker — a snapshot of the stages configured
+    when it was created."""
 
     project = models.OneToOneField(
         Project, verbose_name="المشروع", on_delete=models.CASCADE,
@@ -467,7 +474,7 @@ class Manufacturing(models.Model):
 
     @classmethod
     def create_for_project(cls, project):
-        """ينشئ متابعة بسجل لكل خطوة نشطة حسب التهيئة الحالية."""
+        """Create a tracker with one record per active stage in the current setup."""
         stages = list(
             ManufacturingStage.objects.filter(is_active=True, phase__is_active=True)
             .order_by("phase__order", "order", "id")
@@ -482,14 +489,14 @@ class Manufacturing(models.Model):
         return manufacturing
 
     def ordered_records(self):
-        """كل السجلات بترتيب سير العمل المحسوب من ترتيب المراحل والخطوات."""
+        """Every record in workflow order, derived from phase and stage order."""
         return (
             self.records.select_related("stage", "stage__phase")
             .order_by("stage__phase__order", "stage__order", "stage__id")
         )
 
     def active_records(self):
-        """السجلات المحسوبة في سير العمل — تُستثنى الخطوات الموقوفة."""
+        """The records that count towards the workflow; disabled stages drop out."""
         return [
             record for record in self.ordered_records()
             if record.is_active_step
@@ -497,7 +504,7 @@ class Manufacturing(models.Model):
 
     @property
     def progress_percent(self):
-        """نسبة الإنجاز من الخطوات النشطة — تتغير تلقائياً مع تغيّر التهيئة."""
+        """Progress across active stages — it follows configuration changes."""
         records = self.active_records()
         if not records:
             return 0
@@ -506,7 +513,7 @@ class Manufacturing(models.Model):
 
     @property
     def current_record(self):
-        """أول خطوة نشطة غير مكتملة."""
+        """The first active stage that is not finished."""
         for record in self.active_records():
             if record.status != StageStatus.DONE:
                 return record
@@ -518,7 +525,7 @@ class Manufacturing(models.Model):
         return bool(records) and all(r.status == StageStatus.DONE for r in records)
 
     def phases_with_records(self):
-        """تجميع السجلات حسب المرحلة للعرض، بترتيب سير العمل."""
+        """Records grouped by phase for display, in workflow order."""
         groups = []
         for record in self.ordered_records():
             phase = record.stage.phase
@@ -529,10 +536,11 @@ class Manufacturing(models.Model):
 
 
 class ManufacturingStageRecord(models.Model):
-    """حالة خطوة واحدة في متابعة مشروع.
+    """The state of one stage inside a project's tracker.
 
-    الربط بالخطوة عبر FK محمي (PROTECT): إعادة تسمية الخطوة تنعكس تلقائياً،
-    وإيقافها لا يمس السجل، وحذفها ممنوع ما دام مرجعاً في سجل تاريخي.
+    The link to the stage is a protected FK (PROTECT): renaming a stage shows
+    up here automatically, disabling it leaves records untouched, and deleting
+    one is refused while any historical record still references it.
     """
 
     manufacturing = models.ForeignKey(
@@ -571,7 +579,8 @@ class ManufacturingStageRecord(models.Model):
 
     @property
     def blocked_by(self):
-        """أول خطوة نشطة سابقة غير مكتملة — الخطوات الموقوفة لا تعيق التقدم."""
+        """The first unfinished active stage before this one; disabled stages
+        never block progress."""
         for record in self.manufacturing.ordered_records():
             if record.pk == self.pk:
                 return None
@@ -588,7 +597,7 @@ class ManufacturingStageRecord(models.Model):
         )
 
 
-# ===================== التقارير =====================
+# ===================== Reports =====================
 class ReportJobStatus(models.TextChoices):
     QUEUED = "queued", "قيد الانتظار"
     RUNNING = "running", "جارٍ الإنشاء"
@@ -597,11 +606,12 @@ class ReportJobStatus(models.TextChoices):
 
 
 class ReportJob(models.Model):
-    """طلب إنشاء تقرير PDF لمشروع.
+    """A request to build a project's PDF report.
 
-    التوليد الفعلي يُنفَّذ في خيط خلفي (انظر core/reports.py) حتى لا يبقى
-    طلب المستخدم منتظراً ولا يُشغل عامل الخادم طوال مدة التوليد — الصفحة
-    تستطلع حالة الطلب دورياً (HTMX) وتعرض رابط التحميل فور الاكتمال.
+    The work itself runs on a background thread (see core/reports.py) so the
+    user's request does not wait and a server worker is not tied up for the
+    whole build — the page polls the job status (HTMX) and shows the download
+    link as soon as it is ready.
     """
 
     project = models.ForeignKey(

@@ -1,9 +1,13 @@
-"""منطق الأعمال: حساب التكاليف وإحصاءات لوحة المعلومات.
+"""Business logic: cost calculation and dashboard statistics.
 
-نُقل حرفياً من النظام السابق (server/sqlite.ts) مع الحفاظ على نفس المعادلات:
-    تكلفة الموظفين = ساعات عادية × أجر الساعة + ساعات إضافية × (أجر إضافي أو 1.5×)
-    التكلفة الكلية = الموظفون + الفواتير + المصروفات
-    نسبة الاستخدام = التكلفة الكلية ÷ الميزانية × 100
+Ported verbatim from the legacy system (server/sqlite.ts), keeping the same
+formulas:
+    labour cost   = regular hours x hourly rate
+                    + overtime hours x (overtime rate or 1.5x)
+    total cost    = labour + invoices + expenses
+    usage percent = total cost / budget x 100
+
+STATUS_* below are user-facing labels, so they stay Arabic.
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +25,7 @@ CENTS = Decimal("0.01")
 TENTH = Decimal("0.1")
 OVERTIME_MULTIPLIER = Decimal("1.5")
 
-# حدود حالة الميزانية (كما في النظام السابق)
+# Budget status thresholds (same as the legacy system)
 WARNING_THRESHOLD = Decimal("80")
 OVER_BUDGET_THRESHOLD = Decimal("100")
 
@@ -33,12 +37,12 @@ _money = DecimalField(max_digits=18, decimal_places=4)
 
 
 def q2(value):
-    """تقريب إلى منزلتين عشريتين."""
+    """Round to two decimal places."""
     return (value or ZERO).quantize(CENTS, rounding=ROUND_HALF_UP)
 
 
 def q1(value):
-    """تقريب إلى منزلة عشرية واحدة (النِسب)."""
+    """Round to one decimal place (percentages)."""
     return (value or ZERO).quantize(TENTH, rounding=ROUND_HALF_UP)
 
 
@@ -51,7 +55,7 @@ def budget_status(usage_percent):
 
 
 def budget_status_class(usage_percent):
-    """لون التنبيه في الواجهة."""
+    """Alert colour used in the interface."""
     if usage_percent > OVER_BUDGET_THRESHOLD:
         return "error"
     if usage_percent > WARNING_THRESHOLD:
@@ -78,12 +82,12 @@ class ProjectCost:
 
     @property
     def usage_capped(self):
-        """نسبة الاستخدام محدودة بـ100 لعرض شريط التقدم."""
+        """Usage percent capped at 100 for the progress bar."""
         return min(self.usage_percent, Decimal("100"))
 
 
 def _worker_cost_expression():
-    """تعبير SQL لتكلفة سجل ساعات واحد."""
+    """SQL expression for the cost of a single timesheet row."""
     return (
         F("regular_hours") * F("worker__hourly_rate")
         + F("overtime_hours") * Coalesce(
@@ -117,7 +121,7 @@ def _assemble(project_id, budget, workers, invoices, expenses, payments):
 
 
 def calc_project_cost(project_id, budget=None):
-    """حساب تكلفة مشروع واحد."""
+    """Calculate the cost of one project."""
     if budget is None:
         budget = (
             Project.objects.filter(pk=project_id)
@@ -146,7 +150,7 @@ def calc_project_cost(project_id, budget=None):
 
 
 def calc_project_costs_batch(project_ids):
-    """حساب تكاليف عدة مشاريع باستعلامات مجمّعة (لتفادي N+1)."""
+    """Calculate costs for several projects in grouped queries (avoids N+1)."""
     ids = list(project_ids)
     if not ids:
         return {}
@@ -194,7 +198,7 @@ def calc_project_costs_batch(project_ids):
 
 
 def attach_costs(projects):
-    """إلحاق كائن التكلفة بكل مشروع في قائمة."""
+    """Attach a cost object to every project in a list."""
     projects = list(projects)
     costs = calc_project_costs_batch([p.id for p in projects])
     for project in projects:
@@ -203,7 +207,7 @@ def attach_costs(projects):
 
 
 def dashboard_stats():
-    """إحصاءات الصفحة الرئيسية."""
+    """Statistics for the dashboard page."""
     status_counts = list(
         Project.objects.values("status").annotate(cnt=Count("id")).order_by("-cnt")
     )
@@ -229,8 +233,9 @@ def dashboard_stats():
         billed=Coalesce(Sum("total_amount"), Value(ZERO), output_field=_money),
     )
 
-    # الترتيب حسب التكلفة الكلية المعروضة نفسها: نأخذ أعلى 15 حسب الفواتير
-    # (وهي الجزء الأكبر من التكلفة) ثم نحسب تكلفتها الكاملة ونرتّبها.
+    # Order by the same total cost that is displayed: take the top 15 by
+    # invoice value (the largest share of cost), then compute their full cost
+    # and sort that.
     shortlist = list(
         Project.objects.annotate(
             invoices_cost=Coalesce(Sum("invoices__total_amount"), Value(ZERO), output_field=_money)
@@ -256,7 +261,7 @@ def dashboard_stats():
 
 
 def next_invoice_number():
-    """توليد رقم الفاتورة التالي (INV-####) كما في النظام السابق."""
+    """Next invoice number (INV-####), numbered as in the legacy system."""
     import re
 
     last = (
@@ -275,7 +280,7 @@ def next_invoice_number():
 
 
 def worker_hours_with_costs(worker):
-    """سجل ساعات موظف مع التكاليف وأسماء المشاريع."""
+    """A worker's timesheet rows with costs and project names."""
     rows = (
         WorkHour.objects.filter(worker=worker)
         .select_related("project", "worker")
@@ -290,7 +295,7 @@ def worker_hours_with_costs(worker):
 
 
 def project_hours_with_costs(project):
-    """سجل ساعات مشروع مع التكاليف وأسماء الموظفين."""
+    """A project's timesheet rows with costs and worker names."""
     rows = (
         WorkHour.objects.filter(project=project)
         .select_related("worker")

@@ -1,10 +1,10 @@
-# ===================== المرحلة 1: بناء ملف التنسيق =====================
+# ===================== Stage 1: build the stylesheet =====================
 FROM node:22-slim AS css
 
 WORKDIR /build
 
-# نثبّت أدوات البناء مباشرة بدل npm install الكامل، لتفادي تنزيل
-# ثنائيات supabase CLI (devDependency) أثناء بناء الصورة على الخادم
+# Install the build tools directly instead of a full npm install, so the
+# supabase CLI binaries (a devDependency) are not downloaded during a build
 RUN npm install --no-audit --no-fund --no-save \
         tailwindcss@4 @tailwindcss/cli@4 daisyui@5
 
@@ -13,10 +13,10 @@ COPY core/templates/ ./core/templates/
 RUN npx @tailwindcss/cli -i ./assets/app.css -o ./app.css --minify
 
 
-# ===================== المرحلة 2: التشغيل =====================
+# ===================== Stage 2: runtime =====================
 FROM python:3.12-slim AS runtime
 
-# متطلبات WeasyPrint لتوليد تقارير PDF بالعربية + الخطوط العربية
+# WeasyPrint's requirements for Arabic PDF reports, plus the Arabic fonts
 RUN apt-get update && apt-get install --no-install-recommends -y \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
@@ -38,24 +38,25 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# كود التطبيق
+# Application code
 COPY manage.py entrypoint.sh ./
 COPY config/ ./config/
 COPY core/ ./core/
 
-# ملف التنسيق المبني في المرحلة الأولى
+# The stylesheet built in stage 1
 COPY --from=css /build/app.css ./core/static/css/app.css
 
 RUN chmod +x entrypoint.sh \
     && mkdir -p /app/data /app/media /app/staticfiles
 
-# مستخدم غير جذري
+# Non-root user
 RUN useradd --create-home --uid 10001 factory \
     && chown -R factory:factory /app
 USER factory
 
-# جمع الملفات الثابتة أثناء البناء (لا يحتاج قاعدة بيانات)
-RUN python manage.py collectstatic --noinput --clear
+# Collect static files at build time. USE_SQLITE=1 only satisfies the settings
+# module — collectstatic touches no database, and none is reachable at build.
+RUN USE_SQLITE=1 python manage.py collectstatic --noinput --clear
 
 EXPOSE 8000
 

@@ -1,10 +1,11 @@
-"""تقارير PDF بالعربية عبر WeasyPrint (بديل Puppeteer في النظام السابق).
+"""Arabic PDF reports through WeasyPrint (the legacy system used Puppeteer).
 
-توليد التقرير قد يستغرق عدة ثوانٍ لمشروع فيه بيانات كثيرة (فواتير/ساعات/
-مصروفات) — لذا لا يُنفَّذ داخل نفس الطلب: الضغط على «إنشاء تقرير» ينشئ
-سجل ReportJob ويُشغّل التوليد في خيط خلفي منفصل، فيرجع الطلب فوراً ويبقى
-عامل الخادم (gunicorn worker) حراً لخدمة بقية المستخدمين. الصفحة تستطلع
-حالة الطلب دورياً عبر HTMX حتى يظهر رابط التحميل.
+Building a report can take several seconds for a project with a lot of data
+(invoices, hours, expenses), so it does not run inside the request: pressing
+"generate report" creates a ReportJob row and starts the build on a separate
+background thread. The request returns immediately and the gunicorn worker
+stays free for other users, while the page polls the job status over HTMX
+until the download link appears.
 """
 
 import logging
@@ -29,8 +30,8 @@ from .services import ZERO, calc_project_cost, project_hours_with_costs
 
 logger = logging.getLogger(__name__)
 
-# أي طلب "جارٍ الإنشاء" لفترة أطول من هذا يُعتبر عالقاً (مثلاً بسبب إعادة
-# تشغيل الخادم أثناء التوليد) — يُتاح لصاحبه إعادة المحاولة بدل الانتظار للأبد.
+# A job that stays "running" for longer than this is treated as stuck (a server
+# restart mid-build, for example) so its owner can retry instead of waiting.
 STALE_AFTER = timedelta(minutes=10)
 
 
@@ -43,8 +44,8 @@ def _safe_filename(project):
 
 
 def _render_report_pdf(project, generated_by):
-    """يبني ملف الـ PDF الكامل لتقرير المشروع. يُستدعى من الخيط الخلفي."""
-    from weasyprint import HTML  # استيراد مؤجل ليبقى بدء الخادم سريعاً
+    """Build the complete report PDF. Called from the background thread."""
+    from weasyprint import HTML  # deferred import to keep server start-up fast
 
     cost = calc_project_cost(project.pk, project.budget)
     invoices = list(project.invoices.order_by("-issue_date", "-id"))
@@ -73,7 +74,7 @@ def _render_report_pdf(project, generated_by):
 
 
 def _run_report_job(job_id):
-    """ينفَّذ في خيط منفصل عن خيط الطلب — لا يحجز عامل الخادم أثناء التوليد."""
+    """Runs on its own thread, so no server worker is held during the build."""
     try:
         try:
             job = ReportJob.objects.select_related("project", "requested_by").get(pk=job_id)
@@ -86,8 +87,8 @@ def _run_report_job(job_id):
 
         try:
             pdf_bytes = _render_report_pdf(job.project, job.requested_by)
-        except Exception as exc:  # أي خطأ في التوليد يُسجَّل على الطلب لا كخطأ خادم للمستخدم
-            logger.exception("فشل إنشاء تقرير المشروع #%s", job.project_id)
+        except Exception as exc:  # record build failures on the job, not as a 500
+            logger.exception("Report generation failed for project #%s", job.project_id)
             job.status = ReportJobStatus.FAILED
             job.error_message = str(exc) or exc.__class__.__name__
             job.finished_at = timezone.now()
@@ -99,15 +100,16 @@ def _run_report_job(job_id):
         job.finished_at = timezone.now()
         job.save(update_fields=["file", "status", "finished_at"])
     finally:
-        # هذا الخيط لن يُستخدم مجدداً — إغلاق اتصاله بقاعدة البيانات صراحة
-        # مهم خصوصاً خلف مجمّع اتصالات (Supabase/pgbouncer).
+        # This thread is done, so close its database connection explicitly —
+        # it matters behind a connection pooler (Supabase/pgbouncer).
         connection.close()
 
 
 @login_required
 @require_perm("view_reports")
 def project_report_generate(request, pk):
-    """يطلب إنشاء تقرير جديد وينفّذه في الخلفية — لا ينتظر المتصفح توليد الملف."""
+    """Queue a new report and build it in the background; the browser waits for
+    nothing."""
     project = get_object_or_404(Project, pk=pk)
 
     active = ReportJob.objects.filter(
@@ -117,7 +119,7 @@ def project_report_generate(request, pk):
         messages.info(request, "هناك طلب تقرير قيد التنفيذ بالفعل لهذا المشروع")
     else:
         job = ReportJob.objects.create(project=project, requested_by=request.user)
-        # يبدأ الخيط فقط بعد تأكيد حفظ سجل الطلب في قاعدة البيانات
+        # Start the thread only once the job row is committed to the database
         transaction.on_commit(
             lambda: threading.Thread(
                 target=_run_report_job, args=(job.id,), daemon=True,
@@ -131,7 +133,8 @@ def project_report_generate(request, pk):
 @login_required
 @require_perm("view_reports")
 def project_report_status(request, pk):
-    """جزء HTMX يعرض حالة آخر طلب تقرير لهذا المشروع — يُستطلَع دورياً أثناء التنفيذ."""
+    """HTMX fragment showing this project's latest report job; polled while it
+    runs."""
     project = get_object_or_404(Project, pk=pk)
     job = ReportJob.objects.filter(project=project).order_by("-id").first()
 
@@ -152,7 +155,7 @@ def project_report_status(request, pk):
 @login_required
 @require_perm("view_reports")
 def project_report_download(request, pk, job_id):
-    """تنزيل ملف تقرير جاهز — لا يُنشئ شيئاً، فقط يخدم الملف المحفوظ مسبقاً."""
+    """Download a finished report — builds nothing, just serves the saved file."""
     project = get_object_or_404(Project, pk=pk)
     job = get_object_or_404(ReportJob, pk=job_id, project=project)
     if job.status != ReportJobStatus.DONE or not job.file:

@@ -1,4 +1,7 @@
-"""اختبارات نظام الصلاحيات المبني على المجموعات."""
+"""Tests for the group-based permission system.
+
+Group and label strings stay Arabic: they are real data rows, not code text.
+"""
 
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
@@ -34,7 +37,7 @@ def make_user(username, group=None):
 
 
 class DefaultGroupsTests(TestCase):
-    """المجموعات الافتراضية تُنشأ بالترحيل بصلاحياتها الصحيحة."""
+    """The default groups are created by the migration with the right permissions."""
 
     def test_default_groups_exist_with_expected_permissions(self):
         for name, codenames in DEFAULT_GROUPS.items():
@@ -56,7 +59,7 @@ class DefaultGroupsTests(TestCase):
 
 
 class PermissionInheritanceTests(TestCase):
-    """المستخدم يرث صلاحيات مجموعته تلقائياً."""
+    """A user inherits their group's permissions automatically."""
 
     def test_user_inherits_group_permissions(self):
         group = make_group("قراءة المشاريع", ["view_projects"])
@@ -68,7 +71,7 @@ class PermissionInheritanceTests(TestCase):
         group = make_group("متغيرة", ["view_projects"])
         user = make_user("member", group)
         group.permissions.add(perm("edit_project"))
-        user = User.objects.get(pk=user.pk)  # تجاوز كاش الصلاحيات
+        user = User.objects.get(pk=user.pk)  # bypass the permission cache
         self.assertTrue(user.has_perm("core.edit_project"))
 
     def test_employee_only_when_group_has_no_permissions(self):
@@ -79,9 +82,9 @@ class PermissionInheritanceTests(TestCase):
 
 
 class ViewEnforcementTests(TestCase):
-    """كل مسار يفرض صلاحية قسمه على الخادم."""
+    """Every route enforces its module permission server-side."""
 
-    # (اسم المسار، الصلاحية المطلوبة، وسائط المسار)
+    # (route name, required permission, route arguments)
     PROTECTED = [
         ("dashboard", "view_dashboard", []),
         ("project_list", "view_projects", []),
@@ -110,7 +113,7 @@ class ViewEnforcementTests(TestCase):
                 self.assertEqual(response.status_code, 200, route)
 
     def test_missing_permission_is_denied(self):
-        # مستخدم له صلاحية واحدة فقط — كل المسارات الأخرى تُرفض (403)
+        # A user with a single permission — every other route is denied (403)
         group = make_group("قراءة فقط", ["view_projects"])
         user = make_user("limited", group)
         self.client.force_login(user)
@@ -134,7 +137,7 @@ class ViewEnforcementTests(TestCase):
 
 
 class GroupManagementTests(TestCase):
-    """إنشاء مجموعات جديدة بصلاحيات حرة وتعديلها وحذفها."""
+    """Creating groups with arbitrary permissions, editing and deleting them."""
 
     def setUp(self):
         self.admin = make_user("boss", Group.objects.get(name="مدير"))
@@ -151,7 +154,7 @@ class GroupManagementTests(TestCase):
             set(group.permissions.values_list("codename", flat=True)),
             {"view_invoices", "add_invoice", "edit_invoice"},
         )
-        # عضو المجموعة الجديدة يرث صلاحياتها فوراً
+        # A member of the new group inherits its permissions immediately
         member = make_user("inv-user", group)
         self.client.force_login(member)
         self.assertEqual(self.client.get(reverse("invoice_list")).status_code, 200)
@@ -182,7 +185,7 @@ class GroupManagementTests(TestCase):
 
 
 class UserManagementTests(TestCase):
-    """إنشاء مستخدم مع إسناده لمجموعة."""
+    """Creating a user and assigning them to a group."""
 
     def setUp(self):
         self.admin = make_user("boss2", Group.objects.get(name="مدير"))
@@ -215,13 +218,14 @@ class UserManagementTests(TestCase):
         self.assertTrue(user.has_perm("core.view_projects"))
 
 
-# ===================== التصنيع =====================
+# ===================== Manufacturing =====================
 def make_workflow(*phase_specs):
-    """يبني تهيئة سير عمل بأسماء عشوائية — لإثبات أن المنطق لا يعتمد على الأسماء.
+    """Build a workflow with arbitrary names, proving the logic never depends
+    on them.
 
-    phase_specs: أزواج (اسم المرحلة، [أسماء الخطوات بالترتيب])
+    phase_specs: (phase name, [stage names in order]) pairs
     """
-    # تعطيل أي تهيئة سابقة (بما فيها البذور) حتى تكون البيئة معزولة
+    # Disable any earlier configuration (seed data included) for isolation
     ManufacturingPhase.objects.update(is_active=False)
     stages = {}
     for order, (phase_name, stage_names) in enumerate(phase_specs, start=1):
@@ -238,7 +242,7 @@ def workflow_names(manufacturing):
 
 
 class SeedDataTests(TestCase):
-    """البذور الافتراضية أُنشئت بالترحيل ولم تُكرَّر."""
+    """The default seed data was created by the migration and not duplicated."""
 
     def test_default_workflow_seeded(self):
         phases = list(ManufacturingPhase.objects.order_by("order"))
@@ -270,7 +274,7 @@ class SeedDataTests(TestCase):
 
 
 class WorkflowConfigTests(TestCase):
-    """سير العمل يُحسب من التهيئة، لا من أسماء أو ثوابت في الكود."""
+    """The workflow comes from configuration, not from names or constants."""
 
     def test_new_workflow_uses_current_active_config(self):
         make_workflow(("Phase X", ["Stage A", "Stage B"]), ("Phase Y", ["Stage C"]))
@@ -288,7 +292,7 @@ class WorkflowConfigTests(TestCase):
     def test_added_stage_appears_in_new_workflows_only(self):
         stages = make_workflow(("Phase X", ["Stage A", "Stage C"]))
         old = Manufacturing.create_for_project(Project.objects.create(name="old"))
-        # إدراج خطوة وسيطة بين A و C — بترتيب بيني دون أي تعديل كود
+        # Insert a stage between A and C by ordering alone, with no code change
         ManufacturingStage.objects.create(
             phase=stages["Stage A"].phase, name="Stage B", order=1
         )
@@ -312,7 +316,7 @@ class WorkflowConfigTests(TestCase):
 
 
 class WorkflowProgressionTests(TestCase):
-    """قواعد التقدم عامة وتعمل مع أي أسماء وأي عدد خطوات."""
+    """Progression rules are generic: any names, any number of stages."""
 
     def setUp(self):
         make_workflow(("Phase X", ["Stage A", "Stage B"]), ("Phase Y", ["Stage C"]))
@@ -341,14 +345,14 @@ class WorkflowProgressionTests(TestCase):
     def test_status_update_view_enforces_order(self):
         boss = make_user("wf-boss", Group.objects.get(name="مدير"))
         self.client.force_login(boss)
-        # محاولة إكمال الخطوة الثانية قبل الأولى تُرفض
+        # Completing the second stage before the first is refused
         self.client.post(
             reverse("manufacturing_record_status", args=[self.b.pk]),
             {"action": "complete"},
         )
         self.b.refresh_from_db()
         self.assertEqual(self.b.status, StageStatus.NOT_STARTED)
-        # إكمال الأولى ثم الثانية يمر
+        # Completing the first and then the second goes through
         self.client.post(
             reverse("manufacturing_record_status", args=[self.a.pk]),
             {"action": "complete"},
@@ -363,7 +367,7 @@ class WorkflowProgressionTests(TestCase):
 
 
 class ManufacturingPagesTests(TestCase):
-    """صفحات التصنيع تعرض البيانات المهيّأة ديناميكياً."""
+    """Manufacturing pages render whatever is configured, dynamically."""
 
     def test_detail_page_renders_configured_workflow(self):
         make_workflow(("Phase X", ["Stage A", "Stage B"]))
@@ -376,11 +380,11 @@ class ManufacturingPagesTests(TestCase):
         for name in ("Phase X", "Stage A", "Stage B"):
             self.assertIn(name, content)
         response = self.client.get(reverse("manufacturing_list"))
-        self.assertContains(response, "Stage A")  # الخطوة الحالية في الجدول
+        self.assertContains(response, "Stage A")  # the current stage shown in the table
 
 
 class HistoricalIntegrityTests(TestCase):
-    """تعديل التهيئة لا يفسد السجلات التاريخية."""
+    """Configuration changes never corrupt historical records."""
 
     def setUp(self):
         self.stages = make_workflow(("Phase X", ["Stage A", "Stage B", "Stage C"]))
@@ -399,9 +403,9 @@ class HistoricalIntegrityTests(TestCase):
         self.stages["Stage B"].is_active = False
         self.stages["Stage B"].save()
         names = workflow_names(self.m)
-        self.assertIn("Stage B", names)  # يبقى في السجل التاريخي
+        self.assertIn("Stage B", names)  # still present in the historical record
         active = [r.stage.name for r in self.m.active_records()]
-        self.assertNotIn("Stage B", active)  # ولا يُحسب في سير العمل النشط
+        self.assertNotIn("Stage B", active)  # but not counted in the active workflow
 
     def test_deactivated_stage_does_not_block_progression(self):
         a, b, c = list(self.m.ordered_records())
@@ -433,7 +437,7 @@ class HistoricalIntegrityTests(TestCase):
 
 
 class ProgressCalculationTests(TestCase):
-    """نسبة الإنجاز تُحسب ديناميكياً من الخطوات النشطة."""
+    """Progress is calculated dynamically from the active stages."""
 
     def setUp(self):
         self.stages = make_workflow(("Phase X", ["Stage A", "Stage B", "Stage C"]))
@@ -450,34 +454,35 @@ class ProgressCalculationTests(TestCase):
         a = self.m.ordered_records()[0]
         a.status = StageStatus.DONE
         a.save()
-        self.assertEqual(self.m.progress_percent, 33)  # 1 من 3
+        self.assertEqual(self.m.progress_percent, 33)  # 1 of 3
         self.stages["Stage B"].is_active = False
         self.stages["Stage B"].save()
-        self.assertEqual(self.m.progress_percent, 50)  # 1 من 2 نشطتين
+        self.assertEqual(self.m.progress_percent, 50)  # 1 of the 2 that stay active
 
     def test_new_stage_affects_new_workflows_percentage(self):
-        # في المتابعة القائمة: إكمال الكل = 100% بثلاث خطوات
+        # On the existing tracker: completing all three stages is 100%
         for record in self.m.ordered_records():
             record.status = StageStatus.DONE
             record.save()
         self.assertEqual(self.m.progress_percent, 100)
-        # إضافة خطوة نشطة جديدة لا تفسد المتابعة القائمة
+        # Adding a new active stage does not disturb the existing tracker
         ManufacturingStage.objects.create(
             phase=self.stages["Stage A"].phase, name="Stage D", order=9
         )
         self.assertEqual(self.m.progress_percent, 100)
-        # لكنها تدخل في حساب المتابعات الجديدة
+        # but it does count for trackers created afterwards
         new = Manufacturing.create_for_project(Project.objects.create(name="p2"))
         done = list(new.ordered_records())
         for record in done[:2]:
             record.status = StageStatus.DONE
             record.save()
-        self.assertEqual(new.progress_percent, 50)  # 2 من 4
+        self.assertEqual(new.progress_percent, 50)  # 2 of 4
 
 
-# ===================== تقارير المشاريع (مهمة خلفية) =====================
+# ===================== Project reports (background job) =====================
 class ReportJobGenerationTests(TestCase):
-    """طلب التقرير يُنشئ سجلاً فوراً دون توليد الملف داخل نفس الطلب."""
+    """Requesting a report creates the row at once, without building the file
+    inside the request."""
 
     def setUp(self):
         self.group = make_group("تقارير", ["view_reports", "view_projects"])
@@ -509,7 +514,8 @@ class ReportJobGenerationTests(TestCase):
         self.assertTrue(ReportJob.objects.filter(pk=old.pk, status=ReportJobStatus.DONE).exists())
 
     def test_generate_requires_permission(self):
-        # صلاحية أخرى غير فارغة حتى لا يُحوَّل كموظف بلا صلاحيات (302) بل يُرفض (403)
+        # Give one unrelated permission so the user is denied (403) rather than
+        # redirected as a permission-less employee (302)
         outsider = make_user("no-perm", make_group("بلا تقارير", ["view_projects"]))
         self.client.force_login(outsider)
         response = self.client.post(
@@ -520,7 +526,7 @@ class ReportJobGenerationTests(TestCase):
 
 
 class ReportJobWorkerTests(TestCase):
-    """الدالة المنفَّذة في الخيط الخلفي تبني PDF فعلياً وتُحدّث حالة الطلب."""
+    """The background-thread function really builds a PDF and updates the job."""
 
     def setUp(self):
         self.user = make_user("worker-user", make_group("تنفيذ", ["view_reports"]))
@@ -540,11 +546,11 @@ class ReportJobWorkerTests(TestCase):
         job.file.delete(save=False)
 
     def test_run_report_job_missing_job_is_a_noop(self):
-        _run_report_job(999999)  # لا يوجد بهذا المعرّف — لا يجب أن يفشل
+        _run_report_job(999999)  # no such id — must not raise
 
 
 class ReportJobStatusAndDownloadTests(TestCase):
-    """جزء الاستطلاع (HTMX) ورابط التحميل يطابقان حالة الطلب الفعلية."""
+    """The HTMX polling fragment and download link follow the real job state."""
 
     def setUp(self):
         self.user = make_user("status-user", make_group("حالة", ["view_reports"]))
@@ -586,7 +592,7 @@ class ReportJobStatusAndDownloadTests(TestCase):
         job.file.delete(save=False)
 
 
-# ===================== فلترة المشاريع بتاريخ الإنشاء =====================
+# ===================== Project filtering by creation date =====================
 class ProjectDateFilterTests(TestCase):
     def setUp(self):
         self.user = make_user("date-user", make_group("عرض المشاريع", ["view_projects"]))

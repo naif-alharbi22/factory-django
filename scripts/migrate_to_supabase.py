@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-"""تنفيذ ترحيل قاعدة البيانات إلى Supabase والتحقق منه.
+"""Run the database migration to Supabase and verify it.
 
-لا ينفّذ هذا السكربت أي عملية تدميرية: لا حذف، لا TRUNCATE، لا DROP.
-إن وجد بيانات موجودة مسبقاً في الوجهة فإنه يتوقف ويطلب قراراً.
+This script performs no destructive operation: no deletes, no TRUNCATE, no
+DROP. If it finds existing data at the destination it stops and asks for a
+decision instead.
 """
 
 import os
@@ -19,7 +20,7 @@ GREEN, RED, YELLOW, DIM, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", 
 
 
 def mask(text):
-    """إخفاء كلمة المرور في أي نص قبل طباعته."""
+    """Mask the password in any text before printing it."""
     return re.sub(r"(://[^:/@]+:)[^@]*(@)", r"\1****\2", str(text))
 
 
@@ -34,7 +35,7 @@ def run(args, env=None, check=True, quiet=False):
     if not quiet and out:
         print(mask(out))
     if check and proc.returncode != 0:
-        print(f"{RED}فشل الأمر: {' '.join(args[:3])}...{RESET}")
+        print(f"{RED}Command failed: {' '.join(args[:3])}...{RESET}")
         sys.exit(1)
     return proc
 
@@ -55,14 +56,14 @@ def main():
     runtime = env_file.get("DATABASE_URL", "")
 
     if not direct or "://" not in direct or re.match(r"postgresql://[^:]+:@", direct):
-        print(f"{RED}DIRECT_DATABASE_URL غير مضبوط. نفّذ: ./scripts/set-db-password.sh{RESET}")
+        print(f"{RED}DIRECT_DATABASE_URL is not set. Run: ./scripts/set-db-password.sh{RESET}")
         sys.exit(1)
 
-    # الترحيلات والاستيراد عبر مجمّع الجلسات (5432)
+    # Migrations and the import go through the session pooler (5432)
     migrate_env = {"DATABASE_URL": direct}
 
-    # ---------- 1) التحقق من الاتصال ----------
-    head("1) التحقق من الاتصال بـ Supabase")
+    # ---------- 1) connection check ----------
+    head("1) Checking the connection to Supabase")
     probe = f'''
 import django, os
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -79,17 +80,17 @@ print("  server :", version.split(" on ")[0])
 '''
     run([PY, "-c", probe], env=migrate_env)
 
-    # ---------- 2) فحص Django ----------
+    # ---------- 2) Django checks ----------
     head("2) python manage.py check")
     run([PY, "manage.py", "check"], env=migrate_env)
 
-    # ---------- 3) الترحيلات ----------
-    head("3) python manage.py migrate  (عبر مجمّع الجلسات 5432)")
+    # ---------- 3) migrations ----------
+    head("3) python manage.py migrate  (through the session pooler, 5432)")
     run([PY, "manage.py", "showmigrations", "--plan"], env=migrate_env, quiet=True)
     run([PY, "manage.py", "migrate", "--noinput"], env=migrate_env)
 
-    # ---------- 4) التأكد أن الوجهة فارغة قبل الاستيراد ----------
-    head("4) فحص الوجهة قبل استيراد البيانات")
+    # ---------- 4) make sure the destination is empty ----------
+    head("4) Inspecting the destination before importing data")
     guard = '''
 import django, os, sys
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -102,25 +103,25 @@ existing = {m.__name__: m.objects.count() for m in
             (Project, Worker, WorkHour, Invoice, InvoiceItem, InvoicePayment,
              ProjectPayment, Expense, ProjectType, ExpenseCategory, Session)}
 non_empty = {k: v for k, v in existing.items() if v}
-# المستخدمون يُنشأون فقط عبر الاستيراد؛ الجداول التطبيقية يجب أن تكون فارغة
-print("  جداول غير فارغة:", non_empty or "لا يوجد — الوجهة نظيفة")
+# Users are created only by the import; application tables must be empty
+print("  non-empty tables:", non_empty or "none — the destination is clean")
 sys.exit(2 if non_empty else 0)
 '''
     proc = run([PY, "-c", guard], env=migrate_env, check=False)
     if proc.returncode == 2:
-        print(f"{YELLOW}الوجهة تحتوي بيانات مسبقاً — توقّف السكربت لتفادي التعارض.{RESET}")
-        print("لن يُحذف أي شيء. راجع الحالة ثم قرّر.")
+        print(f"{YELLOW}The destination already holds data — stopping to avoid a clash.{RESET}")
+        print("Nothing will be deleted. Review the state, then decide.")
         sys.exit(2)
 
-    # ---------- 5) استيراد البيانات ----------
-    head("5) استيراد البيانات (loaddata)")
+    # ---------- 5) data import ----------
+    head("5) Importing data (loaddata)")
     stamp = (BASE / "backups" / ".latest-stamp").read_text().strip()
     fixture = f"backups/data-{stamp}.json"
-    print(f"  الملف: {fixture}")
+    print(f"  file: {fixture}")
     run([PY, "manage.py", "loaddata", fixture], env=migrate_env)
 
-    # ---------- 6) ضبط المتسلسلات ----------
-    head("6) ضبط متسلسلات PostgreSQL")
+    # ---------- 6) sequence reset ----------
+    head("6) Resetting PostgreSQL sequences")
     seq = '''
 import django, os
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -133,9 +134,9 @@ sql = connection.ops.sequence_reset_sql(no_style(), models)
 with connection.cursor() as c:
     for statement in sql:
         c.execute(statement)
-print(f"  أُعيد ضبط {len(sql)} متسلسلة")
+print(f"  reset {len(sql)} sequences")
 
-# التحقق: أعلى معرّف مقابل القيمة التالية للمتسلسلة
+# Verification: highest id against the sequence's current value
 from core.models import Project, Worker, Invoice, WorkHour
 for model in (Project, Worker, Invoice, WorkHour):
     table = model._meta.db_table
@@ -144,13 +145,13 @@ for model in (Project, Worker, Invoice, WorkHour):
         top = c.fetchone()[0]
         c.execute(f"SELECT last_value FROM pg_get_serial_sequence('{table}', 'id')")
         last = c.fetchone()[0]
-    status = "OK" if last >= top else "!! أقل من أعلى معرّف"
+    status = "OK" if last >= top else "!! below the highest id"
     print(f"  {table:<24} max_id={top:<6} sequence={last:<6} {status}")
 '''
     run([PY, "-c", seq], env=migrate_env)
 
-    # ---------- 7) مقارنة أعداد الصفوف ----------
-    head("7) مقارنة أعداد الصفوف: SQLite مقابل Supabase")
+    # ---------- 7) row count comparison ----------
+    head("7) Row counts: SQLite vs Supabase")
     compare = f'''
 import django, os, sqlite3, sys
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -191,8 +192,8 @@ sys.exit(1 if bad else 0)
     proc = run([PY, "-c", compare], env=migrate_env, check=False)
     counts_ok = proc.returncode == 0
 
-    # ---------- 8) فحص العلاقات والحسابات ----------
-    head("8) فحص العلاقات والحسابات على Supabase")
+    # ---------- 8) relationship and calculation checks ----------
+    head("8) Checking relationships and calculations on Supabase")
     rel = '''
 import django, os
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -202,22 +203,22 @@ from core.services import calc_project_cost
 
 p = Project.objects.filter(invoices__isnull=False).distinct().order_by("-id").first()
 cost = calc_project_cost(p.pk, p.budget)
-print(f"  مشروع #{p.pk} {p.name[:30]}")
-print(f"    الفواتير المرتبطة : {p.invoices.count()}")
-print(f"    ساعات العمل       : {p.work_hours.count()}")
-print(f"    الدفعات           : {p.payments.count()}")
-print(f"    التكلفة المحسوبة  : {cost.total_cost}  (استخدام {cost.usage_percent}%)")
+print(f"  project #{p.pk} {p.name[:30]}")
+print(f"    linked invoices : {p.invoices.count()}")
+print(f"    work hours      : {p.work_hours.count()}")
+print(f"    payments        : {p.payments.count()}")
+print(f"    computed cost   : {cost.total_cost}  (usage {cost.usage_percent}%)")
 
 orphan_hours = WorkHour.objects.filter(worker__isnull=True).count()
 orphan_inv = Invoice.objects.filter(project__isnull=True).count()
-print(f"  سجلات ساعات بلا موظف : {orphan_hours}")
-print(f"  فواتير بلا مشروع     : {orphan_inv}")
-print(f"  المستخدمون: " + ", ".join(f"{u.username}({u.group_name})" for u in User.objects.all()))
+print(f"  work-hour rows with no worker : {orphan_hours}")
+print(f"  invoices with no project      : {orphan_inv}")
+print(f"  users: " + ", ".join(f"{u.username}({u.group_name})" for u in User.objects.all()))
 '''
     run([PY, "-c", rel], env=migrate_env)
 
-    # ---------- 9) اختبار مجمّع المعاملات (وضع التشغيل) ----------
-    head("9) اختبار مجمّع المعاملات (6543) — وضع تشغيل التطبيق")
+    # ---------- 9) transaction pooler test (runtime mode) ----------
+    head("9) Transaction pooler test (6543) — how the app runs")
     if runtime and ":6543" in runtime:
         pooler = '''
 import django, os
@@ -228,18 +229,18 @@ from django.db import connection
 from core.models import Project
 print("  DISABLE_SERVER_SIDE_CURSORS:", settings.DATABASES["default"].get("DISABLE_SERVER_SIDE_CURSORS"))
 print("  port:", connection.settings_dict["PORT"])
-print("  استعلام تجريبي — عدد المشاريع:", Project.objects.count())
-print("  أول 3 مشاريع:", list(Project.objects.order_by("-id").values_list("name", flat=True)[:3]))
+print("  sample query — project count:", Project.objects.count())
+print("  first 3 projects:", list(Project.objects.order_by("-id").values_list("name", flat=True)[:3]))
 '''
         run([PY, "-c", pooler], env={"DATABASE_URL": runtime})
     else:
-        print(f"  {YELLOW}DATABASE_URL لا يستخدم المنفذ 6543 — تخطّي{RESET}")
+        print(f"  {YELLOW}DATABASE_URL does not use port 6543 — skipping{RESET}")
 
-    head("النتيجة")
+    head("Result")
     if counts_ok:
-        print(f"{GREEN}  اكتمل الترحيل والتحقق بنجاح.{RESET}")
+        print(f"{GREEN}  Migration and verification completed successfully.{RESET}")
     else:
-        print(f"{RED}  اكتمل الترحيل مع اختلاف في أعداد الصفوف — راجع الجدول أعلاه.{RESET}")
+        print(f"{RED}  Migration finished with row-count differences — see the table above.{RESET}")
         sys.exit(1)
 
 

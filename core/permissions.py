@@ -1,12 +1,16 @@
-"""صلاحيات النظام — نظام مجموعات مبني على Django Groups/Permissions.
+"""Application permissions — group-based, built on Django Groups/Permissions.
 
-    لكل قسم/وحدة في النظام صلاحياته الخاصة (عرض/إدارة)، وتُجمَع الصلاحيات
-    في مجموعات (auth.Group). يرث المستخدم كل صلاحيات مجموعته تلقائياً.
+    Every module of the system has its own permissions (view/manage), and those
+    permissions are collected into groups (auth.Group). A user inherits every
+    permission of their group automatically.
 
-    المجموعات الافتراضية:
-      مدير   : كل الصلاحيات، بما فيها المستخدمون والمجموعات
-      محاسب  : كل الصلاحيات عدا قسمَي المستخدمين والمجموعات
-      موظف   : بدون صلاحيات — صفحة تسجيل الساعات فقط (متاحة لكل مستخدم مسجّل)
+    Default groups (names are stored in the database, so they stay Arabic):
+      مدير   : every permission, users and groups included
+      محاسب  : every permission except the users and groups modules
+      موظف   : no permissions — only the timesheet page, open to any signed-in user
+
+    Labels below are user-facing: they appear on the groups and permissions
+    screens, so they stay Arabic like the rest of the interface.
 """
 
 from functools import wraps
@@ -15,9 +19,9 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
 
-# سجل الصلاحيات — المصدر الوحيد لكل صلاحيات النظام، مجمّعة حسب القسم.
-# codename يُخزَّن في auth.Permission تحت core.apppermission.
-# صلاحية مستقلة لكل إجراء (عرض/إضافة/تعديل/حذف) في كل قسم.
+# Permission registry — the single source of truth, grouped by module.
+# Each codename is stored in auth.Permission under core.apppermission.
+# One permission per action (view/add/edit/delete) in every module.
 PERMISSION_MODULES = [
     ("لوحة المعلومات", [
         ("view_dashboard", "عرض لوحة المعلومات"),
@@ -84,9 +88,10 @@ PERMISSION_MODULES = [
 ALL_PERMISSIONS = [perm for _, perms in PERMISSION_MODULES for perm in perms]
 ALL_CODENAMES = [codename for codename, _ in ALL_PERMISSIONS]
 
-# أقسام لا تُمنح افتراضياً لغير المديرين (إدارة النظام وتهيئة سير العمل)
+# Modules not granted to non-managers by default (system administration
+# and workflow configuration)
 _ADMIN_MODULES = ("المستخدمون", "المجموعات", "إعدادات التصنيع")
-# المجموعات الافتراضية وصلاحياتها
+# The default groups and the permissions each one carries
 DEFAULT_GROUPS = {
     "مدير": ALL_CODENAMES,
     "محاسب": [
@@ -99,7 +104,7 @@ DEFAULT_GROUPS = {
 
 
 def home_route(user):
-    """الصفحة الرئيسية المناسبة حسب صلاحيات المستخدم."""
+    """The landing page that suits the user's permissions."""
     if user.has_perm("core.view_dashboard"):
         return "dashboard"
     for codename, route in (
@@ -118,7 +123,7 @@ def home_route(user):
 
 
 def require_perm(codename):
-    """يشترط صلاحية قسم محددة — من ليس لديه أي صلاحيات يُحوَّل لصفحة ساعاته."""
+    """Require one module permission; a user with none goes to their timesheet."""
 
     def decorator(view):
         @wraps(view)

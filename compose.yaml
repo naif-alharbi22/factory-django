@@ -1,8 +1,9 @@
-# نظام إدارة تكاليف المشاريع — التشغيل عبر Docker
+# Project cost management system — running with Docker
 #
-#   1) cp .env.example .env   ثم ضع رابط Supabase في DATABASE_URL
+#   1) cp .env.example .env   then put the Supabase connection details in it
+#      (DATABASE_URL, or SUPABASE_PROJECT_REF with SUPABASE_DB_PASSWORD)
 #   2) docker compose up -d --build
-#   3) لنقل بيانات النظام القديم مرة واحدة:
+#   3) one-off migration of the legacy system's data:
 #      docker compose --profile tools run --rm import
 
 services:
@@ -20,8 +21,11 @@ services:
       DJANGO_DEBUG: "${DJANGO_DEBUG:-0}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
       RUN_MIGRATIONS: "${RUN_MIGRATIONS:-1}"
-      TZ: "${TZ:-Asia/Riyadh}"
-      # يُستخدم فقط إذا لم يُضبط DATABASE_URL (وضع SQLite الاحتياطي)
+      # Display time zone; stored timestamps stay UTC either way
+      DISPLAY_TIME_ZONE: "${DISPLAY_TIME_ZONE:-Asia/Riyadh}"
+      # Container clock, for log timestamps only
+      TZ: "${TZ:-UTC}"
+      # SQLite file path — used only in local development mode (USE_SQLITE=1)
       SQLITE_PATH: /app/data/factory.sqlite3
     ports:
       - "${WEB_PORT:-8000}:8000"
@@ -35,8 +39,9 @@ services:
       retries: 3
       start_period: 20s
 
-  # خدمة لمرة واحدة: استيراد بيانات النظام القديم
-  # مهم: يُربط المجلد كاملاً وليس ملف .db وحده (ملفات -wal و -shm ضرورية)
+  # One-off service: import the legacy system's data.
+  # Important: mount the whole directory, not just the .db file — the -wal and
+  # -shm files are needed too.
   import:
     profiles: ["tools"]
     image: factory-projects:latest
