@@ -28,8 +28,10 @@ services:
       # Container clock, for log timestamps.
       TZ: "${TZ:-UTC}"
     ports:
-      # Use "127.0.0.1:8000:8000" once a reverse proxy sits in front.
-      - "${WEB_PORT:-8000}:8000"
+      # Caddy reaches the app over the internal network, so this publish is
+      # only for direct access while setting things up. Once HTTPS works, set
+      # WEB_BIND=127.0.0.1 in .env so the app is reachable through TLS only.
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8000}:8000"
     volumes:
       # Application data lives in Supabase; only uploads are on disk.
       - media:/app/media
@@ -42,6 +44,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # TLS and the public entry point. Certificates are issued and renewed
+  # automatically, and stored in the caddy-data volume — keep that volume.
+  caddy:
+    image: caddy:2-alpine
+    container_name: factory-caddy
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # Fails fast with a readable message when the domain is not configured.
+      SITE_DOMAIN: "${SITE_DOMAIN:?set SITE_DOMAIN in .env, e.g. app.example.com}"
+      ACME_EMAIL: "${ACME_EMAIL:-}"
+      TZ: "${TZ:-UTC}"
     logging:
       driver: "json-file"
       options:
@@ -76,3 +104,5 @@ services:
 
 volumes:
   media:
+  caddy-data:
+  caddy-config:

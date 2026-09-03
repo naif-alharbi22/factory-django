@@ -1,0 +1,25 @@
+# Reverse proxy in front of the app: terminates TLS and forwards to Gunicorn.
+#
+# Caddy obtains and renews a Let's Encrypt certificate on its own, and sets
+# X-Forwarded-Proto, which is what makes DJANGO_BEHIND_PROXY=1 and
+# DJANGO_SECURE_COOKIES=1 correct on the Django side.
+#
+# SITE_DOMAIN comes from .env. Ports 80 and 443 must be reachable from the
+# internet: the certificate is issued over port 80.
+
+{
+	email {$ACME_EMAIL:webmaster@localhost}
+}
+
+{$SITE_DOMAIN} {
+	# "web" is the service name in compose.prod.yml, resolved on the internal
+	# network — the app itself never needs a public port.
+	reverse_proxy web:8000
+
+	encode zstd gzip
+
+	# Uploaded reports can be large; give them room.
+	request_body {
+		max_size 32MB
+	}
+}

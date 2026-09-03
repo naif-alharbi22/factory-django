@@ -209,22 +209,44 @@ server will build an outdated version.
 
 ## HTTPS and a custom domain
 
-Once a reverse proxy (Nginx, Caddy, or your provider's) terminates TLS:
+`compose.prod.yml` includes a Caddy service that terminates TLS and forwards to
+the app over the internal network. It obtains and renews a Let's Encrypt
+certificate on its own — no certbot, no manual renewal.
 
-1. Bind the container to localhost only, so it is not reachable directly:
-   ```yaml
-   ports:
-     - "127.0.0.1:8000:8000"
+1. Point the domain's A record at the server, and open ports **80 and 443** in
+   the provider's firewall. Port 80 is not optional: the certificate is issued
+   over it.
+2. In `.env`:
    ```
-2. Enable the proxy-aware settings:
-   ```yaml
-   DJANGO_BEHIND_PROXY: "1"
-   DJANGO_SECURE_COOKIES: "1"
+   SITE_DOMAIN=your-domain.example
+   ACME_EMAIL=you@example.com
+   DJANGO_ALLOWED_HOSTS=your-domain.example
+   DJANGO_BEHIND_PROXY=1
+   DJANGO_SECURE_COOKIES=1
    ```
-3. Add the domain to `DJANGO_ALLOWED_HOSTS`:
-   ```yaml
-   DJANGO_ALLOWED_HOSTS: "your-domain.example,www.your-domain.example"
+3. Start it:
+   ```bash
+   docker compose -f compose.prod.yml up -d
    ```
+4. Watch the certificate being issued:
+   ```bash
+   docker logs -f factory-caddy
+   ```
+   It takes a few seconds to a couple of minutes. `certificate obtained
+   successfully` means it worked.
+5. Once HTTPS serves the site, close the direct port by adding `WEB_BIND=127.0.0.1`
+   to `.env` and running the `up -d` command again, so the app is reachable
+   through TLS only.
+
+`DJANGO_BEHIND_PROXY=1` makes Django trust Caddy's `X-Forwarded-Proto`, so it
+knows the request arrived over HTTPS. Without it every form submission fails
+CSRF validation, because the browser sends `Origin: https://...` while Django
+believes the request is plain HTTP.
+
+**Do not set `DJANGO_SECURE_COOKIES=1` while browsing over plain HTTP** (for
+example directly on `:8000`). The session and CSRF cookies are then marked
+`Secure`, the browser never sends them back, and every form submission fails
+with a CSRF 403 — with no hint as to why.
 
 CSRF trusted origins are derived from `DJANGO_ALLOWED_HOSTS`, so the domain only
 needs adding in one place. Set `DJANGO_CSRF_TRUSTED` explicitly only when the
