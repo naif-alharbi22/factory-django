@@ -11,25 +11,57 @@
 # ===============================================================
 
 services:
+  # ---------- PostgreSQL ----------
+  # Runs on this same host. There is no `ports:` entry on purpose: 5432 stays
+  # on the internal network, unreachable from the internet. Reach it with a
+  # desktop client through an SSH tunnel instead:
+  #   ssh -L 5432:127.0.0.1:5432 user@your-server
+  db:
+    # Pinned to the major version. A newer Postgres refuses to open an older
+    # data directory, so an unattended bump would leave this crash-looping.
+    image: postgres:17
+    container_name: app-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "factory"
+      POSTGRES_USER: "factory"
+      # Use the same value inside DATABASE_URL below.
+      POSTGRES_PASSWORD: "CHANGE_ME_DB_PASSWORD"
+      TZ: "UTC"
+    volumes:
+      # This volume IS the database. Deleting it deletes the application data.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factory -d factory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
     image: CHANGE_ME_REGISTRY/CHANGE_ME_USER/CHANGE_ME_IMAGE:latest
     container_name: app-web
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
 
     environment:
-      # ---------- Supabase database (required) ----------
-      # The app will not start without these. Either paste the full
-      # connection URL from Supabase (Project Settings -> Database ->
-      # Connection string, transaction pooler, port 6543)...
-      DATABASE_URL: "postgresql://postgres.CHANGE_ME_PROJECT_REF:CHANGE_ME_PASSWORD@aws-0-CHANGE_ME_REGION.pooler.supabase.com:6543/postgres"
+      # ---------- Database (required) ----------
+      # The app will not start without this. "db" is the service above,
+      # resolved on the internal network; the password must match
+      # POSTGRES_PASSWORD there, percent-encoded if it contains @ : / or #.
+      DATABASE_URL: "postgresql://factory:CHANGE_ME_DB_PASSWORD@db:5432/factory"
 
-      # ...or leave DATABASE_URL empty and set these instead, and the URL
-      # is built from them (the password is percent-encoded for you):
-      # SUPABASE_PROJECT_REF: "CHANGE_ME_PROJECT_REF"
-      # SUPABASE_DB_REGION: "CHANGE_ME_REGION"
-      # SUPABASE_DB_PASSWORD: "CHANGE_ME_PASSWORD"
-
-      DB_SSL_REQUIRE: "1"
+      # 0 because the connection never leaves this host and the postgres
+      # image ships without a TLS certificate. Set to 1 for any database
+      # reached over a network.
+      DB_SSL_REQUIRE: "0"
       DB_CONN_MAX_AGE: "60"
 
       # ---------- Django ----------
@@ -81,4 +113,5 @@ services:
         max-file: "3"
 
 volumes:
+  pgdata:
   media:

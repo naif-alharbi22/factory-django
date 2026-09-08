@@ -33,7 +33,7 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
-Fill in the Supabase connection details — see [Database](#database) below; the
+Fill in the database connection details — see [Database](#database) below; the
 application will not start without them. Then:
 
 ```bash
@@ -52,31 +52,44 @@ Then open **http://localhost:8000**.
 
 ### Database
 
-The application runs on **Supabase (PostgreSQL)** and reads its connection
-details from the environment — there is no silent fallback to a local file. If
-they are missing, startup stops with a message naming what to set.
+The application runs on **PostgreSQL 17**, hosted by the `db` service in the
+compose stack — the same machine as the app, so a query costs a fraction of a
+millisecond instead of a round trip to a managed provider. The connection
+details are read from the environment; there is no silent fallback to a local
+file. If they are missing, startup stops with a message naming what to set.
 
-Copy `.env.example` to `.env` and fill in **one** of these:
+Copy `.env.example` to `.env` and set:
 
-- `DATABASE_URL` — the full connection string from Supabase
-  (*Project Settings → Database → Connection string*, transaction pooler,
-  port `6543`), or
-- `SUPABASE_PROJECT_REF`, `SUPABASE_DB_REGION` and `SUPABASE_DB_PASSWORD` —
-  the URL is assembled from them and the password is percent-encoded for you.
+- `POSTGRES_PASSWORD` — the password the `db` container is created with
+- `DATABASE_URL` — how the app reaches it, with the same password:
+  `postgresql://factory:PASSWORD@db:5432/factory`
+- `DB_SSL_REQUIRE=0` — the connection stays on the internal Docker network and
+  the postgres image ships without a certificate
 
-`./scripts/set-db-password.sh` writes the password into `.env` without echoing
-it to the screen or the shell history.
+`./scripts/set-db-password.sh` writes a password into `.env` without echoing it
+to the screen or the shell history.
 
-Run migrations through the session pooler (port `5432`), which is what
-`DIRECT_DATABASE_URL` holds:
+Migrations run from the same URL — the stack has no separate pooler port to
+route around:
 
 ```bash
-DATABASE_URL="$DIRECT_DATABASE_URL" .venv/bin/python manage.py migrate
+.venv/bin/python manage.py migrate
 ```
 
 For offline development, `USE_SQLITE=1` runs against a local SQLite file
 instead. The test suite switches to SQLite on its own, so tests never touch the
-Supabase project.
+real database.
+
+The database lives in the `pgdata` Docker volume. That volume *is* the data:
+backing up the server without it backs up nothing that matters.
+
+#### Moving off Supabase
+
+Earlier deployments kept the data in a Supabase project. `scripts/migrate_from_supabase.sh`
+copies it across — it dumps the `public` schema, restores it into the `db`
+service and then compares the row counts of every table before declaring
+success. It changes nothing on Supabase, so the old `DATABASE_URL` remains a
+working rollback.
 
 ### Dates and times
 
@@ -156,7 +169,7 @@ docker compose down
 - Static files are served by WhiteNoise — no separate web server is needed for
   internal use.
 - Uploaded media lives in a named volume and survives container rebuilds; the
-  application data itself lives in Supabase.
+  application data lives in the `pgdata` volume alongside it.
 
 Every pull request runs the tests, checks for missing migrations and builds the
 container image without publishing it. Merging to `main` repeats those checks,
@@ -172,13 +185,14 @@ All configuration is read from environment variables (or a `.env` file).
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | *(empty)* | Supabase connection URL (transaction pooler, port `6543`). Required unless the `SUPABASE_*` variables below are set. |
-| `DIRECT_DATABASE_URL` | *(derived)* | Session-pooler URL (port `5432`) for migrations and imports. |
-| `SUPABASE_PROJECT_REF` | *(empty)* | Project reference ID; used to build the URL when `DATABASE_URL` is empty. |
-| `SUPABASE_DB_PASSWORD` | *(empty)* | Database password; percent-encoded automatically. |
-| `SUPABASE_DB_REGION` | `us-east-1` | Region in the pooler hostname, e.g. `ap-northeast-1`. |
-| `SUPABASE_DB_HOST` / `_PORT` / `_USER` / `_NAME` | *(derived)* | Overrides for a self-hosted or non-standard Supabase setup. |
-| `USE_SQLITE` | `0` | `1` runs on local SQLite instead of Supabase. Defaults to `1` while running tests. |
+| `DATABASE_URL` | *(empty)* | Connection URL, e.g. `postgresql://factory:PASSWORD@db:5432/factory`. Required unless the `SUPABASE_*` variables below are set. |
+| `POSTGRES_DB` / `POSTGRES_USER` | `factory` | Database and role the `db` container is created with. |
+| `POSTGRES_PASSWORD` | *(none)* | Password for that role. No default — compose refuses to start without it. |
+| `DB_SSL_REQUIRE` | `1` | `0` for the local `db` service; `1` for any database reached over a network. |
+| `DIRECT_DATABASE_URL` | *(derived)* | Separate URL for migrations and imports. Only needed when the runtime URL goes through a pooler. |
+| `SUPABASE_DUMP_URL` | *(empty)* | Read only by `scripts/migrate_from_supabase.sh`, during the one-off move off Supabase. |
+| `SUPABASE_PROJECT_REF` / `_DB_PASSWORD` / `_DB_REGION` / `_DB_HOST` / `_PORT` / `_USER` / `_NAME` | *(empty)* | Legacy path: builds the Supabase pooler URL when `DATABASE_URL` is empty. Kept so an old `.env` keeps working. |
+| `USE_SQLITE` | `0` | `1` runs on local SQLite instead of PostgreSQL. Defaults to `1` while running tests. |
 | `SQLITE_PATH` | `factory.sqlite3` | SQLite file path, used only when `USE_SQLITE=1`. |
 | `DB_SSL_REQUIRE` | `1` | Require TLS for the database connection. |
 | `DB_CONN_MAX_AGE` | `60` | Connection reuse time in seconds. |

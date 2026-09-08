@@ -56,7 +56,7 @@ docker compose -f compose.prod.yml up -d
 ```
 
 The `.env` file must sit next to it — the container will not start without the
-Supabase connection details.
+database connection details.
 
 ### 4. Make every compose command target this file
 
@@ -167,11 +167,10 @@ Paste the contents of `docker-compose.deploy.yml` into your panel, after
 replacing every value marked `CHANGE_ME`:
 
 - `image` — the tag you pushed in step 2
-- `DATABASE_URL` — the Supabase connection string (*Project Settings →
-  Database → Connection string*, transaction pooler, port `6543`). Instead of
-  a URL you may set `SUPABASE_PROJECT_REF`, `SUPABASE_DB_REGION` and
-  `SUPABASE_DB_PASSWORD` and let the app build it. The container will not
-  start without one of the two.
+- `DATABASE_URL` — `postgresql://factory:PASSWORD@db:5432/factory`, with the
+  password you put in `POSTGRES_PASSWORD`. Set `DB_SSL_REQUIRE=0` alongside it:
+  the connection never leaves the internal network. The container will not
+  start without a URL.
 - `DJANGO_SECRET_KEY` — generate with:
   ```bash
   python3 -c "import secrets; print(secrets.token_urlsafe(64))"
@@ -208,8 +207,7 @@ git clone YOUR_REPOSITORY_URL /opt/app && cd /opt/app
 cp .env.example .env && nano .env
 ```
 
-Fill in the Supabase connection details (`DATABASE_URL`, or
-`SUPABASE_PROJECT_REF` + `SUPABASE_DB_PASSWORD`), `DJANGO_SECRET_KEY` and
+Fill in `POSTGRES_PASSWORD`, `DATABASE_URL`, `DJANGO_SECRET_KEY` and
 `DJANGO_ALLOWED_HOSTS`, then:
 
 ```bash
@@ -309,10 +307,20 @@ docker compose exec web sh
 - Migrations run on every container start by default. If you scale to more than
   one replica, set `RUN_MIGRATIONS=0` and run migrations once as a separate
   step, so concurrent containers do not race each other.
-- Application data lives in Supabase — back it up there (*Project Settings →
-  Database → Backups*). Uploaded media lives in a named Docker volume and needs
-  backing up separately.
-- The container refuses to start when the Supabase connection details are
+- Application data lives in the `pgdata` Docker volume, on this server and
+  nowhere else. Nothing backs it up automatically: a VPS snapshot is a
+  crash-consistent image of the whole machine, not a database backup, and it
+  does not survive the machine itself. Schedule a `pg_dump` that ships
+  off-site. Uploaded media lives in the `media` volume and needs the same.
+- Postgres is pinned to `postgres:17` and carries no Watchtower label, so it is
+  never replaced automatically. A major upgrade needs a dump and restore —
+  a newer server refuses to open an older data directory.
+- The database port is deliberately not published. To reach it with a desktop
+  client, tunnel to the host instead:
+  ```bash
+  ssh -L 5432:127.0.0.1:5432 user@your-server
+  ```
+- The container refuses to start when the database connection details are
   missing, and `entrypoint.sh` waits up to `DB_WAIT_SECONDS` (60 by default)
   for the database to answer before giving up. Both cases are visible in
   `docker compose logs web`.

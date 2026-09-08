@@ -122,7 +122,10 @@ def _supabase_url(port):
     )
 
 
-# Port 6543 = transaction pooler (runtime), 5432 = session pooler (migrations).
+# SUPABASE_* is the legacy path, kept so an old .env keeps working: it builds
+# the pooler URLs where port 6543 is the transaction pooler (runtime) and 5432
+# the session pooler (migrations). New deployments set DATABASE_URL directly,
+# pointing at the db service.
 DATABASE_URL = _env("DATABASE_URL") or _supabase_url(_env("SUPABASE_DB_PORT", "6543"))
 DIRECT_DATABASE_URL = _env("DIRECT_DATABASE_URL") or _supabase_url("5432") or DATABASE_URL
 
@@ -164,10 +167,12 @@ elif DATABASE_URL:
         }
 else:
     raise ImproperlyConfigured(
-        "Supabase database connection details are not configured.\n"
-        "Set DATABASE_URL, or SUPABASE_PROJECT_REF together with "
-        "SUPABASE_DB_PASSWORD,\n"
-        "in .env or in the container environment. See .env.example.\n"
+        "Database connection details are not configured.\n"
+        "Set DATABASE_URL in .env or in the container environment — for the "
+        "db\n"
+        "service that ships with the stack it reads:\n"
+        "  postgresql://factory:PASSWORD@db:5432/factory\n"
+        "See .env.example.\n"
         "To develop against local SQLite instead: USE_SQLITE=1"
     )
 
