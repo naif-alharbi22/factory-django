@@ -274,6 +274,83 @@ domain does not work.
 
 ---
 
+## Moving the data off Supabase
+
+A one-off, for a deployment whose data still lives in a Supabase project. The
+copy runs database-to-database over the network: `pg_dump` reads the `public`
+schema and its output is piped straight into `pg_restore` in the `db`
+container. Nothing is written to disk, and nothing is uploaded anywhere.
+
+Supabase is only ever read from. Nothing there is dropped or altered, which is
+what keeps the old `DATABASE_URL` a working way back.
+
+### 1. Put the connection strings in place
+
+In `.env` on the server, set `POSTGRES_PASSWORD` and `DATABASE_URL` (see
+`.env.example`), plus `SUPABASE_DUMP_URL` — the Supabase connection string in
+**session** mode, ending in `:5432/postgres`. *Project Settings → Database →
+Connection string → Session pooler.*
+
+The transaction pooler on `6543` cannot serve `pg_dump`; the script checks for
+it and stops rather than failing halfway.
+
+### 2. Copy
+
+```bash
+./scripts/migrate_from_supabase.sh
+```
+
+It stops the `web` container first so nothing writes mid-copy, refuses a target
+that already holds tables, and finishes by comparing the row count of every
+table between the two databases. A mismatch is an error, and it says so.
+
+Add `--keep-dump` to also write the stream to `backups/`. That file holds
+employee and customer records; it is covered by `.gitignore` and belongs
+nowhere near the repository.
+
+The web container stays stopped either way — nothing is switched over yet.
+
+### 3. Switch the application over
+
+Clear `SUPABASE_DUMP_URL` from `.env`, along with `DIRECT_DATABASE_URL` and any
+`SUPABASE_*` values, then:
+
+```bash
+docker compose -f compose.prod.yml up -d
+```
+
+The log should report the migrations as already applied — the schema came
+across with the data:
+
+```bash
+docker compose -f compose.prod.yml logs -f web
+```
+
+### 4. Check before trusting it
+
+Log in and confirm the record counts look right on screen, then create
+something small and delete it again. That last step is the one that matters: it
+proves the primary-key sequences came across, and that new rows are not
+colliding with existing ones.
+
+### Rolling back
+
+Put the old Supabase `DATABASE_URL` back in `.env`, set `DB_SSL_REQUIRE=1`, and
+`up -d`. The project is still there, untouched.
+
+Leave it that way for a week before deleting anything on Supabase. Note that
+rows written to the local database in the meantime are not copied back, so a
+rollback after real use means re-doing the copy in the other direction.
+
+### After the move
+
+The `pgdata` volume is now the only copy of this data anywhere. Nothing backs
+it up on its own, and a VPS snapshot is an image of the whole machine rather
+than a database backup — it does not survive the machine. Schedule a `pg_dump`
+that ships off-site before treating the move as finished.
+
+---
+
 ## Operating the deployment
 
 Follow the logs:

@@ -4,9 +4,15 @@
 #
 #   ./scripts/migrate_from_supabase.sh
 #
-# It dumps the public schema from Supabase, restores it into the db container
-# and then compares the row counts of every table. The web container is stopped
-# for the duration so nothing writes to Supabase while the copy is in flight.
+# The data goes straight from one database into the other: pg_dump reads the
+# public schema over the network and its output is piped into pg_restore in the
+# db container. It never lands on disk, so there is no dump file to guard, to
+# clean up, or to leak into the repository. The web container is stopped for the
+# duration so nothing writes while the copy is in flight, and afterwards the row
+# count of every table is compared between the two databases.
+#
+#   --keep-dump   also write the stream to backups/, as a rollback copy
+#   --force       restore even though the target already holds tables
 #
 # Nothing is deleted on Supabase: the project stays exactly as it is, which is
 # what makes rolling back a matter of putting the old DATABASE_URL back.
@@ -18,6 +24,16 @@ COMPOSE_FILE="${COMPOSE_FILE:-compose.prod.yml}"
 DUMP_DIR="backups"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 DUMP_FILE="$DUMP_DIR/supabase-$STAMP.dump"
+
+FORCE=0
+KEEP_DUMP=0
+for arg in "$@"; do
+    case "$arg" in
+        --force)     FORCE=1 ;;
+        --keep-dump) KEEP_DUMP=1 ;;
+        *) echo "usage: $0 [--force] [--keep-dump]" >&2; exit 2 ;;
+    esac
+done
 
 # Reading .env with `source` breaks on unquoted values (APP_TITLE holds Arabic
 # text with spaces), so pull out single keys instead.
@@ -65,7 +81,7 @@ done
 existing="$(compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
     "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
      where n.nspname='public' and c.relkind='r'" | tr -d '[:space:]')"
-if [ "${existing:-0}" != "0" ] && [ "${1:-}" != "--force" ]; then
+if [ "${existing:-0}" != "0" ] && [ "$FORCE" != "1" ]; then
     echo "error: the target already holds $existing tables in public." >&2
     echo "       Re-run with --force to drop them and restore over the top." >&2
     exit 1
@@ -74,20 +90,41 @@ fi
 echo "==> stopping the web container so nothing writes during the copy"
 compose stop web 2>/dev/null || true
 
-echo "==> dumping the public schema from Supabase"
-docker run --rm -i -e PGURL="$SUPABASE_DUMP_URL" "$PG_IMAGE" \
-    sh -c 'pg_dump "$PGURL" --schema=public --no-owner --no-privileges --format=custom' \
-    > "$DUMP_FILE"
-echo "    $DUMP_FILE ($(du -h "$DUMP_FILE" | cut -f1))"
-
-echo "==> restoring into the db service"
 # The dump recreates `public` itself, and the postgres image ships with that
 # schema already present — dropping it first keeps the restore error-free
-# instead of "schema public already exists".
-compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
-    -c 'DROP SCHEMA IF EXISTS public CASCADE;' >/dev/null
-compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    --no-owner --no-privileges --exit-on-error < "$DUMP_FILE"
+# instead of failing on "schema public already exists".
+echo "==> clearing the target schema"
+# client_min_messages keeps the DROP from listing all 25 tables it cascades to.
+compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 --quiet \
+    -c 'SET client_min_messages = warning; DROP SCHEMA IF EXISTS public CASCADE;' >/dev/null
+
+# pg_dump runs in a throwaway container because it has to match the source
+# server's major version; the local client may well be older, and pg_dump
+# refuses to talk to a newer server than itself.
+dump_from_supabase() {
+    docker run --rm -i -e PGURL="$SUPABASE_DUMP_URL" "$PG_IMAGE" \
+        sh -c 'pg_dump "$PGURL" --schema=public --no-owner --no-privileges --format=custom'
+}
+
+# --single-transaction is what makes the pipe safe: if the connection to
+# Supabase drops halfway, the restore rolls back rather than leaving the target
+# holding half a database.
+restore_into_db() {
+    compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+        --no-owner --no-privileges --single-transaction
+}
+
+if [ "$KEEP_DUMP" = "1" ]; then
+    echo "==> copying Supabase -> db, keeping a copy in $DUMP_DIR"
+    mkdir -p "$DUMP_DIR"
+    dump_from_supabase | tee "$DUMP_FILE" | restore_into_db
+    echo "    kept $DUMP_FILE ($(du -h "$DUMP_FILE" | cut -f1))"
+    echo "    that file holds employee and customer records — it is covered by"
+    echo "    .gitignore, and belongs nowhere near the repository."
+else
+    echo "==> copying Supabase -> db (streamed; nothing written to disk)"
+    dump_from_supabase | restore_into_db
+fi
 
 echo "==> comparing row counts, table by table"
 counts_sql="select string_agg(format('select %L as t, count(*) from %I', relname, relname),
