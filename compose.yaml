@@ -1,12 +1,32 @@
 # Project cost management system — running with Docker
 #
-#   1) cp .env.example .env   then put the Supabase connection details in it
-#      (DATABASE_URL, or SUPABASE_PROJECT_REF with SUPABASE_DB_PASSWORD)
+#   1) cp .env.example .env   then set POSTGRES_PASSWORD and DATABASE_URL
 #   2) docker compose up -d --build
 #   3) one-off migration of the legacy system's data:
 #      docker compose --profile tools run --rm import
 
 services:
+  # Same image and layout as compose.prod.yml, so development runs against the
+  # engine that production uses. The data lives in its own volume and is not
+  # shared with the production stack.
+  db:
+    image: postgres:17
+    container_name: factory-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-factory}"
+      POSTGRES_USER: "${POSTGRES_USER:-factory}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      TZ: "UTC"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-factory}\" -d \"${POSTGRES_DB:-factory}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   web:
     build:
       context: .
@@ -14,6 +34,9 @@ services:
     image: factory-projects:latest
     container_name: factory-web
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file:
       - path: .env
         required: false
@@ -65,5 +88,6 @@ services:
       - --flush
 
 volumes:
+  pgdata:
   media:
   sqlite-data:

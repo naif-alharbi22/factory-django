@@ -56,7 +56,7 @@ docker compose -f compose.prod.yml up -d
 ```
 
 The `.env` file must sit next to it — the container will not start without the
-Supabase connection details.
+database connection details.
 
 ### 4. Make every compose command target this file
 
@@ -167,11 +167,10 @@ Paste the contents of `docker-compose.deploy.yml` into your panel, after
 replacing every value marked `CHANGE_ME`:
 
 - `image` — the tag you pushed in step 2
-- `DATABASE_URL` — the Supabase connection string (*Project Settings →
-  Database → Connection string*, transaction pooler, port `6543`). Instead of
-  a URL you may set `SUPABASE_PROJECT_REF`, `SUPABASE_DB_REGION` and
-  `SUPABASE_DB_PASSWORD` and let the app build it. The container will not
-  start without one of the two.
+- `DATABASE_URL` — `postgresql://factory:PASSWORD@db:5432/factory`, with the
+  password you put in `POSTGRES_PASSWORD`. Set `DB_SSL_REQUIRE=0` alongside it:
+  the connection never leaves the internal network. The container will not
+  start without a URL.
 - `DJANGO_SECRET_KEY` — generate with:
   ```bash
   python3 -c "import secrets; print(secrets.token_urlsafe(64))"
@@ -208,8 +207,7 @@ git clone YOUR_REPOSITORY_URL /opt/app && cd /opt/app
 cp .env.example .env && nano .env
 ```
 
-Fill in the Supabase connection details (`DATABASE_URL`, or
-`SUPABASE_PROJECT_REF` + `SUPABASE_DB_PASSWORD`), `DJANGO_SECRET_KEY` and
+Fill in `POSTGRES_PASSWORD`, `DATABASE_URL`, `DJANGO_SECRET_KEY` and
 `DJANGO_ALLOWED_HOSTS`, then:
 
 ```bash
@@ -276,6 +274,83 @@ domain does not work.
 
 ---
 
+## Moving the data off Supabase
+
+A one-off, for a deployment whose data still lives in a Supabase project. The
+copy runs database-to-database over the network: `pg_dump` reads the `public`
+schema and its output is piped straight into `pg_restore` in the `db`
+container. Nothing is written to disk, and nothing is uploaded anywhere.
+
+Supabase is only ever read from. Nothing there is dropped or altered, which is
+what keeps the old `DATABASE_URL` a working way back.
+
+### 1. Put the connection strings in place
+
+In `.env` on the server, set `POSTGRES_PASSWORD` and `DATABASE_URL` (see
+`.env.example`), plus `SUPABASE_DUMP_URL` — the Supabase connection string in
+**session** mode, ending in `:5432/postgres`. *Project Settings → Database →
+Connection string → Session pooler.*
+
+The transaction pooler on `6543` cannot serve `pg_dump`; the script checks for
+it and stops rather than failing halfway.
+
+### 2. Copy
+
+```bash
+./scripts/migrate_from_supabase.sh
+```
+
+It stops the `web` container first so nothing writes mid-copy, refuses a target
+that already holds tables, and finishes by comparing the row count of every
+table between the two databases. A mismatch is an error, and it says so.
+
+Add `--keep-dump` to also write the stream to `backups/`. That file holds
+employee and customer records; it is covered by `.gitignore` and belongs
+nowhere near the repository.
+
+The web container stays stopped either way — nothing is switched over yet.
+
+### 3. Switch the application over
+
+Clear `SUPABASE_DUMP_URL` from `.env`, along with `DIRECT_DATABASE_URL` and any
+`SUPABASE_*` values, then:
+
+```bash
+docker compose -f compose.prod.yml up -d
+```
+
+The log should report the migrations as already applied — the schema came
+across with the data:
+
+```bash
+docker compose -f compose.prod.yml logs -f web
+```
+
+### 4. Check before trusting it
+
+Log in and confirm the record counts look right on screen, then create
+something small and delete it again. That last step is the one that matters: it
+proves the primary-key sequences came across, and that new rows are not
+colliding with existing ones.
+
+### Rolling back
+
+Put the old Supabase `DATABASE_URL` back in `.env`, set `DB_SSL_REQUIRE=1`, and
+`up -d`. The project is still there, untouched.
+
+Leave it that way for a week before deleting anything on Supabase. Note that
+rows written to the local database in the meantime are not copied back, so a
+rollback after real use means re-doing the copy in the other direction.
+
+### After the move
+
+The `pgdata` volume is now the only copy of this data anywhere. Nothing backs
+it up on its own, and a VPS snapshot is an image of the whole machine rather
+than a database backup — it does not survive the machine. Schedule a `pg_dump`
+that ships off-site before treating the move as finished.
+
+---
+
 ## Operating the deployment
 
 Follow the logs:
@@ -309,10 +384,20 @@ docker compose exec web sh
 - Migrations run on every container start by default. If you scale to more than
   one replica, set `RUN_MIGRATIONS=0` and run migrations once as a separate
   step, so concurrent containers do not race each other.
-- Application data lives in Supabase — back it up there (*Project Settings →
-  Database → Backups*). Uploaded media lives in a named Docker volume and needs
-  backing up separately.
-- The container refuses to start when the Supabase connection details are
+- Application data lives in the `pgdata` Docker volume, on this server and
+  nowhere else. Nothing backs it up automatically: a VPS snapshot is a
+  crash-consistent image of the whole machine, not a database backup, and it
+  does not survive the machine itself. Schedule a `pg_dump` that ships
+  off-site. Uploaded media lives in the `media` volume and needs the same.
+- Postgres is pinned to `postgres:17` and carries no Watchtower label, so it is
+  never replaced automatically. A major upgrade needs a dump and restore —
+  a newer server refuses to open an older data directory.
+- The database port is deliberately not published. To reach it with a desktop
+  client, tunnel to the host instead:
+  ```bash
+  ssh -L 5432:127.0.0.1:5432 user@your-server
+  ```
+- The container refuses to start when the database connection details are
   missing, and `entrypoint.sh` waits up to `DB_WAIT_SECONDS` (60 by default)
   for the database to answer before giving up. Both cases are visible in
   `docker compose logs web`.

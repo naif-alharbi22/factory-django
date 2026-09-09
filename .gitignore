@@ -6,7 +6,10 @@ db.sqlite3
 staticfiles/
 media/
 node_modules/
-.env
+# Every local environment file. .env.production carries real production
+# secrets and the database password — it must never reach the repository.
+.env*
+!.env.example
 
 # Supabase
 supabase/.temp/

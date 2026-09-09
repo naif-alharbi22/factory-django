@@ -10,13 +10,55 @@
 #
 # From then on, pushing to main is the whole deployment.
 #
+# The database runs here too (the db service below), so the stack is
+# self-contained: nothing but Caddy talks to the outside world.
+#
 # Requires a .env file next to this one — see .env.example.
 
 services:
+  # PostgreSQL, on this host. The application data lives in the pgdata volume
+  # below — that volume IS the database; never delete it casually.
+  #
+  # There is deliberately no `ports:` entry: 5432 stays on the internal compose
+  # network, unreachable from the internet. To connect a client from a laptop,
+  # tunnel instead of publishing the port:
+  #   ssh -L 5432:127.0.0.1:5432 user@this-server
+  #   docker compose -f compose.prod.yml exec db psql -U "$POSTGRES_USER" "$POSTGRES_DB"
+  db:
+    # Pinned to the major version on purpose. Postgres does not read the data
+    # directory of a newer major, so an unattended bump to 18 would leave the
+    # container crash-looping — an upgrade needs a dump and restore.
+    image: postgres:17
+    container_name: factory-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-factory}"
+      POSTGRES_USER: "${POSTGRES_USER:-factory}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      # Keeps the server's own clock in UTC; Django converts for display.
+      TZ: "UTC"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-factory}\" -d \"${POSTGRES_DB:-factory}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # No Watchtower label: this container is never replaced automatically.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
     image: ghcr.io/naif-alharbi22/factory-django:latest
     container_name: factory-web
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file:
       - path: .env
         required: true
@@ -33,7 +75,7 @@ services:
       # WEB_BIND=127.0.0.1 in .env so the app is reachable through TLS only.
       - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8000}:8000"
     volumes:
-      # Application data lives in Supabase; only uploads are on disk.
+      # Application data lives in the db service; only uploads are on disk.
       - media:/app/media
     labels:
       # Watchtower only touches containers carrying this label.
@@ -103,6 +145,9 @@ services:
         max-file: "3"
 
 volumes:
+  # The database itself. Backing up the server without backing up this
+  # volume backs up nothing that matters.
+  pgdata:
   media:
   caddy-data:
   caddy-config:
