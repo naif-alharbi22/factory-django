@@ -3,13 +3,16 @@
 Group and label strings stay Arabic: they are real data rows, not code text.
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
 from django.urls import reverse
 
 from .models import (
-    Manufacturing, ManufacturingPhase, ManufacturingStage, Project,
-    ReportJob, ReportJobStatus, StageStatus, User,
+    ActivityAction, ActivityLog, ActivityTarget, Invoice, Manufacturing,
+    ManufacturingPhase, ManufacturingStage, Project, ReportJob,
+    ReportJobStatus, StageStatus, User, Worker,
 )
 from .permissions import ALL_CODENAMES, DEFAULT_GROUPS
 from .reports import _run_report_job
@@ -94,6 +97,8 @@ class ViewEnforcementTests(TestCase):
         ("invoice_list", "view_invoices", []),
         ("invoice_create", "add_invoice", []),
         ("compare", "view_compare", []),
+        ("reports_index", "view_activity", []),
+        ("activity_log", "view_activity", []),
         ("user_list", "view_users", []),
         ("group_list", "view_groups", []),
         ("group_create", "add_group", []),
@@ -626,3 +631,231 @@ class ProjectDateFilterTests(TestCase):
     def test_project_detail_shows_creation_date(self):
         response = self.client.get(reverse("project_detail", args=[self.new.pk]))
         self.assertContains(response, "تاريخ الإنشاء")
+
+
+# ===================== Activity log =====================
+class ActivityLogRecordingTests(TestCase):
+    """Every action a user takes leaves one readable row behind."""
+
+    def setUp(self):
+        self.admin = make_user("logger", Group.objects.get(name="مدير"))
+        self.client.force_login(self.admin)
+
+    def test_project_create_is_recorded_with_actor_and_project(self):
+        self.client.post(reverse("project_create"), {
+            "name": "برج الواجهات", "status": "IN_PROGRESS", "budget": "10000",
+        })
+        project = Project.objects.get(name="برج الواجهات")
+        entry = ActivityLog.objects.get(target_type=ActivityTarget.PROJECT)
+        self.assertEqual(entry.action, ActivityAction.CREATE)
+        self.assertEqual(entry.actor, self.admin)
+        self.assertEqual(entry.actor_name, self.admin.full_name)
+        self.assertEqual(entry.project, project)
+        self.assertIn("برج الواجهات", entry.description)
+
+    def test_payment_and_expense_are_tied_to_their_project(self):
+        project = Project.objects.create(name="مشروع الدفعات")
+        self.client.post(reverse("project_add_payment", args=[project.pk]), {
+            "amount": "500", "payment_date": "2026-01-05", "status": "confirmed",
+        })
+        self.client.post(reverse("project_add_expense", args=[project.pk]), {
+            "title": "مواد", "amount": "300", "expense_date": "2026-01-06",
+        })
+        recorded = ActivityLog.objects.filter(project=project).values_list(
+            "target_type", flat=True
+        )
+        self.assertEqual(
+            set(recorded), {ActivityTarget.PAYMENT, ActivityTarget.EXPENSE}
+        )
+
+    def test_invoice_delete_is_recorded_before_the_row_disappears(self):
+        project = Project.objects.create(name="مشروع الفواتير")
+        invoice = Invoice.objects.create(
+            invoice_number="INV-1", project=project, issue_date="2026-01-01",
+        )
+        self.client.post(reverse("invoice_delete", args=[invoice.pk]))
+        self.assertFalse(Invoice.objects.filter(pk=invoice.pk).exists())
+        entry = ActivityLog.objects.get(target_type=ActivityTarget.INVOICE)
+        self.assertEqual(entry.action, ActivityAction.DELETE)
+        self.assertIn("INV-1", entry.description)
+        self.assertEqual(entry.project, project)
+
+    def test_worker_toggle_is_recorded_as_a_status_change(self):
+        worker = Worker.objects.create(name="سعيد")
+        self.client.post(reverse("worker_toggle_active", args=[worker.pk]))
+        entry = ActivityLog.objects.get(target_type=ActivityTarget.WORKER)
+        self.assertEqual(entry.action, ActivityAction.STATUS)
+        self.assertIsNone(entry.project)
+
+    def test_sign_in_and_out_are_recorded(self):
+        self.client.post(reverse("logout"))
+        User.objects.filter(pk=self.admin.pk)  # the user survives the sign-out
+        self.client.post(reverse("login"), {
+            "username": self.admin.username, "password": "pass123456",
+        })
+        actions = set(
+            ActivityLog.objects.filter(target_type=ActivityTarget.SESSION)
+            .values_list("action", flat=True)
+        )
+        self.assertEqual(actions, {ActivityAction.LOGIN, ActivityAction.LOGOUT})
+
+    def test_a_failing_log_never_costs_the_user_their_work(self):
+        """The audit row is best-effort: its failure must not surface."""
+        project = Project.objects.create(name="مشروع محمي")
+        with patch.object(
+            ActivityLog.objects, "create", side_effect=RuntimeError("db down")
+        ), self.assertLogs("core.activity", level="ERROR"):
+            response = self.client.post(reverse("project_edit", args=[project.pk]), {
+                "name": "اسم جديد", "status": "IN_PROGRESS", "budget": "0",
+            })
+        self.assertRedirects(response, reverse("project_detail", args=[project.pk]))
+        self.assertEqual(Project.objects.get(pk=project.pk).name, "اسم جديد")
+
+
+class ActivityLogSurvivalTests(TestCase):
+    """History outlives what it describes."""
+
+    def test_entry_survives_deleting_its_actor(self):
+        admin = make_user("deleter", Group.objects.get(name="مدير"))
+        victim = make_user("victim", Group.objects.get(name="موظف"))
+        self.client.force_login(admin)
+        self.client.post(reverse("user_delete", args=[victim.pk]))
+
+        entry = ActivityLog.objects.get(target_type=ActivityTarget.USER)
+        self.assertEqual(entry.target_label, victim.full_name)
+
+        # Now delete the actor themselves: the row keeps the name it snapshotted
+        ActivityLog.objects.filter(pk=entry.pk).update(actor=admin)
+        admin.delete()
+        entry = ActivityLog.objects.get(pk=entry.pk)
+        self.assertIsNone(entry.actor)
+        self.assertEqual(entry.actor_name, "deleter")
+
+    def test_entry_survives_deleting_its_project_and_drops_the_link(self):
+        admin = make_user("proj-deleter", Group.objects.get(name="مدير"))
+        project = Project.objects.create(name="مشروع زائل")
+        entry = ActivityLog.objects.create(
+            actor=admin, actor_name=admin.full_name, action=ActivityAction.CREATE,
+            target_type=ActivityTarget.PROJECT, target_id=project.pk,
+            target_label=project.name, description="أنشأ المشروع «مشروع زائل»",
+            project=project, project_name=project.name,
+        )
+        project.delete()
+
+        entry = ActivityLog.objects.get(pk=entry.pk)
+        self.assertIsNone(entry.project)
+        self.assertEqual(entry.project_name, "مشروع زائل")
+        self.assertIsNone(entry.project_url)
+
+
+class ActivityLogPagesTests(TestCase):
+    """The dashboard card and the reports section."""
+
+    def setUp(self):
+        self.admin = make_user("viewer-admin", Group.objects.get(name="مدير"))
+        self.client.force_login(self.admin)
+        self.project = Project.objects.create(name="مشروع الأنشطة")
+        for index in range(12):
+            ActivityLog.objects.create(
+                actor=self.admin, actor_name=self.admin.full_name,
+                action=ActivityAction.CREATE, target_type=ActivityTarget.PROJECT,
+                target_id=self.project.pk, target_label=self.project.name,
+                description=f"حدث رقم {index}", project=self.project,
+                project_name=self.project.name,
+            )
+
+    def test_dashboard_shows_the_latest_ten_only(self):
+        response = self.client.get(reverse("dashboard"))
+        recent = list(response.context["recent_activity"])
+        self.assertEqual(len(recent), 10)
+        # Newest first: the last one created leads
+        self.assertEqual(recent[0].description, "حدث رقم 11")
+
+    def test_dashboard_card_hidden_without_the_permission(self):
+        user = make_user("no-activity", make_group("بلا أنشطة", ["view_dashboard"]))
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(list(response.context["recent_activity"]), [])
+        self.assertNotContains(response, "آخر الأحداث")
+
+    def test_reports_index_lists_the_activity_card(self):
+        response = self.client.get(reverse("reports_index"))
+        self.assertContains(response, "حركة الأنشطة")
+        self.assertEqual(response.context["activity_count"], 12)
+
+    def test_activity_page_paginates(self):
+        response = self.client.get(reverse("activity_log"))
+        self.assertEqual(response.context["total"], 12)
+        self.assertEqual(len(response.context["activities"]), 12)
+
+    def test_reports_index_opens_with_only_the_pdf_permission(self):
+        user = make_user("pdf-only", make_group("تقارير PDF", ["view_reports"]))
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(reverse("reports_index")).status_code, 200)
+        # …but the activity page itself stays closed
+        self.assertEqual(self.client.get(reverse("activity_log")).status_code, 403)
+
+
+class ActivityLogFilterTests(TestCase):
+    """Each filter narrows the list, and they combine."""
+
+    def setUp(self):
+        self.admin = make_user("filter-admin", Group.objects.get(name="مدير"))
+        self.other = make_user("filter-other", Group.objects.get(name="محاسب"))
+        self.client.force_login(self.admin)
+        self.project = Project.objects.create(name="مشروع الفلترة")
+
+        self.by_admin = ActivityLog.objects.create(
+            actor=self.admin, actor_name=self.admin.full_name,
+            action=ActivityAction.CREATE, target_type=ActivityTarget.PROJECT,
+            description="أنشأ المشروع", project=self.project,
+            project_name=self.project.name,
+        )
+        self.by_other = ActivityLog.objects.create(
+            actor=self.other, actor_name=self.other.full_name,
+            action=ActivityAction.DELETE, target_type=ActivityTarget.INVOICE,
+            description="حذف الفاتورة INV-9",
+        )
+        ActivityLog.objects.filter(pk=self.by_admin.pk).update(
+            created_at="2026-01-10T09:00:00Z"
+        )
+        ActivityLog.objects.filter(pk=self.by_other.pk).update(
+            created_at="2026-05-20T09:00:00Z"
+        )
+
+    def descriptions(self, **params):
+        response = self.client.get(reverse("activity_log"), params)
+        return {item.description for item in response.context["activities"]}
+
+    def test_filter_by_actor(self):
+        self.assertEqual(
+            self.descriptions(actor=self.other.pk), {"حذف الفاتورة INV-9"}
+        )
+
+    def test_filter_by_action_and_target(self):
+        self.assertEqual(self.descriptions(action="delete"), {"حذف الفاتورة INV-9"})
+        self.assertEqual(self.descriptions(target="project"), {"أنشأ المشروع"})
+
+    def test_filter_by_project(self):
+        self.assertEqual(self.descriptions(project=self.project.pk), {"أنشأ المشروع"})
+
+    def test_filter_by_date_range(self):
+        self.assertEqual(
+            self.descriptions(date_from="2026-05-01"), {"حذف الفاتورة INV-9"}
+        )
+        self.assertEqual(self.descriptions(date_to="2026-01-31"), {"أنشأ المشروع"})
+
+    def test_search_covers_description_actor_and_project(self):
+        self.assertEqual(self.descriptions(search="INV-9"), {"حذف الفاتورة INV-9"})
+        self.assertEqual(self.descriptions(search="filter-other"), {"حذف الفاتورة INV-9"})
+        self.assertEqual(self.descriptions(search="مشروع الفلترة"), {"أنشأ المشروع"})
+
+    def test_filters_combine(self):
+        self.assertEqual(
+            self.descriptions(actor=self.admin.pk, action="delete"), set()
+        )
+
+    def test_invalid_date_is_ignored_not_an_error(self):
+        response = self.client.get(reverse("activity_log"), {"date_from": "not-a-date"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total"], 2)

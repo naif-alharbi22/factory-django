@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}حركة الأنشطة — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <div class="text-xs opacity-60">
+      <a href="{% url 'reports_index' %}" class="link">التقارير</a> ← حركة الأنشطة
+    </div>
+    <h1 class="mt-1 text-2xl font-bold">حركة الأنشطة</h1>
+    <p class="mt-1 text-sm opacity-60"><span class="nums">{{ total }}</span> حدث</p>
+  </div>
+  <a href="{% url 'reports_index' %}" class="btn btn-sm btn-outline">→ التقارير</a>
+</div>
+
+<div class="card mb-4 bg-base-100 shadow-sm">
+  <div class="card-body p-4">
+    <form hx-get="{% url 'activity_log' %}" hx-target="#activity-table" hx-swap="outerHTML"
+          hx-trigger="submit, change from:select, change from:input[type=date], keyup changed delay:400ms from:input[name=search]"
+          hx-push-url="true" class="flex flex-wrap items-center gap-3">
+      <input type="search" name="search" value="{{ search }}" placeholder="بحث في التفاصيل أو المنفّذ أو المشروع"
+             class="input input-bordered input-sm flex-1 min-w-56">
+
+      <select name="actor" class="select select-bordered select-sm">
+        <option value="">كل المستخدمين</option>
+        {% for person in actors %}
+          <option value="{{ person.pk }}" {% if actor_id == person.pk|stringformat:"s" %}selected{% endif %}>{{ person.full_name }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="action" class="select select-bordered select-sm">
+        <option value="ALL">كل الإجراءات</option>
+        {% for value, label in actions %}
+          <option value="{{ value }}" {% if action == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="target" class="select select-bordered select-sm">
+        <option value="ALL">كل العناصر</option>
+        {% for value, label in targets %}
+          <option value="{{ value }}" {% if target_type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+
+      <select name="project" class="select select-bordered select-sm">
+        <option value="">كل المشاريع</option>
+        {% for item in projects %}
+          <option value="{{ item.pk }}" {% if project_id == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label class="flex items-center gap-1 text-xs opacity-70">
+        من
+        <input type="date" name="date_from" value="{{ date_from }}" class="input input-bordered input-sm">
+      </label>
+      <label class="flex items-center gap-1 text-xs opacity-70">
+        إلى
+        <input type="date" name="date_to" value="{{ date_to }}" class="input input-bordered input-sm">
+      </label>
+
+      <a href="{% url 'activity_log' %}" class="btn btn-ghost btn-sm">مسح الفلاتر</a>
+    </form>
+  </div>
+</div>
+
+{% include "reports/_activity_table.html" %}
+{% endblock %}

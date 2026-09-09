@@ -15,17 +15,23 @@ from datetime import timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
+from django.core.paginator import Paginator
 from django.db import connection, transaction
-from django.db.models import Sum, Value
+from django.db.models import Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from urllib.parse import quote
 
-from .models import Project, ReportJob, ReportJobStatus
-from .permissions import require_perm
+from .activity import log_create
+from .models import (
+    ActivityAction, ActivityLog, ActivityTarget, Project, ReportJob,
+    ReportJobStatus, User,
+)
+from .permissions import require_any_perm, require_perm
 from .services import ZERO, calc_project_cost, project_hours_with_costs
 
 logger = logging.getLogger(__name__)
@@ -125,6 +131,7 @@ def project_report_generate(request, pk):
                 target=_run_report_job, args=(job.id,), daemon=True,
             ).start()
         )
+        log_create(request, job, f"طلب تقرير المشروع «{project.name}»")
         messages.success(request, "جارٍ إنشاء التقرير — سيظهر رابط التحميل هنا خلال لحظات")
 
     return redirect("project_detail", pk=project.pk)
@@ -165,3 +172,88 @@ def project_report_download(request, pk, job_id):
     response = FileResponse(job.file.open("rb"), content_type="application/pdf")
     response["Content-Disposition"] = f"attachment; filename*=UTF-8''{filename}"
     return response
+
+
+# ===================== The reports section =====================
+ACTIVITY_PAGE_SIZE = 25
+
+
+@login_required
+@require_any_perm("view_activity", "view_reports")
+def reports_index(request):
+    """The reports landing page; each card appears only for those who may open
+    it."""
+    return render(request, "reports/index.html", {
+        "activity_count": (
+            ActivityLog.objects.count()
+            if request.user.has_perm("core.view_activity") else 0
+        ),
+    })
+
+
+def _activity_queryset(request):
+    """The activity list with the page's filters applied; every filter is
+    optional and they combine."""
+    qs = ActivityLog.objects.select_related("actor", "project")
+
+    search = request.GET.get("search", "").strip()
+    actor_id = request.GET.get("actor", "").strip()
+    target_type = request.GET.get("target", "").strip()
+    action = request.GET.get("action", "").strip()
+    project_id = request.GET.get("project", "").strip()
+    date_from = parse_date(request.GET.get("date_from", "").strip())
+    date_to = parse_date(request.GET.get("date_to", "").strip())
+
+    if search:
+        qs = qs.filter(
+            Q(description__icontains=search)
+            | Q(actor_name__icontains=search)
+            | Q(target_label__icontains=search)
+            | Q(project_name__icontains=search)
+        )
+    if actor_id.isdigit():
+        qs = qs.filter(actor_id=int(actor_id))
+    if target_type and target_type != "ALL":
+        qs = qs.filter(target_type=target_type)
+    if action and action != "ALL":
+        qs = qs.filter(action=action)
+    if project_id.isdigit():
+        qs = qs.filter(project_id=int(project_id))
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+
+    return qs, {
+        "search": search,
+        "actor_id": actor_id,
+        "target_type": target_type or "ALL",
+        "action": action or "ALL",
+        "project_id": project_id,
+        "date_from": date_from.isoformat() if date_from else "",
+        "date_to": date_to.isoformat() if date_to else "",
+    }
+
+
+@login_required
+@require_perm("view_activity")
+def activity_log(request):
+    """Every action taken in the system: when, by whom, what, and on which
+    project."""
+    qs, filters = _activity_queryset(request)
+    paginator = Paginator(qs, ACTIVITY_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get("page"))
+
+    context = {
+        **filters,
+        "page_obj": page,
+        "activities": page.object_list,
+        "total": paginator.count,
+        "actors": User.objects.order_by("full_name"),
+        "projects": Project.objects.order_by("-id"),
+        "targets": ActivityTarget.choices,
+        "actions": ActivityAction.choices,
+    }
+    if request.headers.get("HX-Request") == "true":
+        return render(request, "reports/_activity_table.html", context)
+    return render(request, "reports/activity.html", context)

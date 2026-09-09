@@ -49,6 +49,9 @@ urlpatterns = [
 
     path("compare/", views.compare, name="compare"),
 
+    path("reports/", reports.reports_index, name="reports_index"),
+    path("reports/activity/", reports.activity_log, name="activity_log"),
+
     path("manufacturing/", views.manufacturing_list, name="manufacturing_list"),
     path("manufacturing/new/", views.manufacturing_create, name="manufacturing_create"),
     path("manufacturing/settings/", views.workflow_settings, name="workflow_settings"),
