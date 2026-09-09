@@ -23,6 +23,25 @@ SSH key is stored anywhere.
   and replaces the running container when the digest changes. Migrations run on
   the new container's start, as they always do.
 
+> **What a merge does not carry.** Watchtower replaces images; it never reads a
+> compose file. So a commit that changes the *shape* of the stack — adding or
+> removing a service, a volume, a port, a `depends_on` — reaches the server
+> without taking effect, and the app comes back up against the old topology.
+>
+> A change like that needs one manual step on the server:
+>
+> ```bash
+> git pull && docker compose -f compose.prod.yml up -d
+> ```
+>
+> The symptom when it is skipped is the app failing to reach a service that
+> exists in the file but was never created — for instance
+> `could not connect to the database: failed to resolve host 'db'` in
+> `docker logs factory-web`, because the `db` container is not running.
+> `docker ps -a --filter name=factory` shows what is actually there.
+>
+> Code-only changes — the usual case — need nothing beyond the merge.
+
 ### 1. Push the workflow
 
 ```bash
