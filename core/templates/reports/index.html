@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}التقارير — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold">التقارير</h1>
+  <p class="mt-1 text-sm opacity-60">تقارير النظام ومتابعة ما يجري فيه</p>
+</div>
+
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {% if perms.core.view_activity %}
+  <a href="{% url 'activity_log' %}"
+     class="card bg-base-100 shadow-sm transition-[border-color,box-shadow] hover:shadow-md border border-transparent hover:border-primary/40">
+    <div class="card-body">
+      <div class="flex items-center gap-3">
+        <div class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-2xl">🗂️</div>
+        <div class="min-w-0">
+          <h2 class="card-title text-base">حركة الأنشطة</h2>
+          <p class="text-xs opacity-60">كل حدث في النظام: متى، ومَن، وماذا، وعلى أي مشروع</p>
+        </div>
+      </div>
+      <div class="mt-2 text-xs opacity-60"><span class="nums">{{ activity_count }}</span> حدث مسجّل</div>
+    </div>
+  </a>
+  {% endif %}
+
+  {% if perms.core.view_reports %}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <div class="flex items-center gap-3">
+        <div class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-accent/10 text-2xl">📄</div>
+        <div class="min-w-0">
+          <h2 class="card-title text-base">تقرير مشروع PDF</h2>
+          <p class="text-xs opacity-60">يُنشأ من صفحة المشروع نفسه</p>
+        </div>
+      </div>
+      <div class="card-actions mt-2">
+        <a href="{% url 'project_list' %}" class="link link-primary text-xs">اختر مشروعاً ←</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

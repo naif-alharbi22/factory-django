@@ -149,4 +149,24 @@
     </div>
   </div>
 </div>
+
+{% if perms.core.view_activity %}
+<!-- آخر الأحداث -->
+<div class="mt-6 card bg-base-100 shadow-sm">
+  <div class="card-body">
+    <div class="flex items-center justify-between">
+      <h2 class="card-title text-base">آخر الأحداث</h2>
+      <a href="{% url 'activity_log' %}" class="link link-primary text-xs">عرض الكل ←</a>
+    </div>
+
+    <div class="mt-2 space-y-2">
+      {% for item in recent_activity %}
+        {% include "partials/activity_item.html" with item=item %}
+      {% empty %}
+        {% include "partials/empty.html" with title="لا توجد أنشطة بعد" hint="ستظهر هنا كل عملية تتم في النظام" %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}

@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 
 from . import permissions as permissions_registry
@@ -644,3 +645,97 @@ class ReportJob(models.Model):
     @property
     def is_active(self):
         return self.status in (ReportJobStatus.QUEUED, ReportJobStatus.RUNNING)
+
+
+# ===================== Activity log =====================
+class ActivityAction(models.TextChoices):
+    CREATE = "create", "إضافة"
+    UPDATE = "update", "تعديل"
+    DELETE = "delete", "حذف"
+    STATUS = "status", "تغيير حالة"
+    LOGIN = "login", "تسجيل دخول"
+    LOGOUT = "logout", "تسجيل خروج"
+
+
+class ActivityTarget(models.TextChoices):
+    PROJECT = "project", "مشروع"
+    WORKER = "worker", "موظف"
+    INVOICE = "invoice", "فاتورة"
+    PAYMENT = "payment", "دفعة"
+    EXPENSE = "expense", "مصروف"
+    WORK_HOURS = "work_hours", "ساعات عمل"
+    MANUFACTURING = "manufacturing", "متابعة تصنيع"
+    STAGE_RECORD = "stage_record", "خطوة تصنيع"
+    PHASE = "phase", "مرحلة تصنيع"
+    STAGE = "stage", "خطوة في الإعدادات"
+    USER = "user", "مستخدم"
+    GROUP = "group", "مجموعة"
+    REPORT = "report", "تقرير"
+    SESSION = "session", "جلسة"
+
+
+# The page each target type links to, and the URL argument it takes. Types that
+# have no page of their own (a payment, a session) are absent on purpose.
+_TARGET_ROUTES = {
+    ActivityTarget.PROJECT: "project_detail",
+    ActivityTarget.WORKER: "worker_detail",
+    ActivityTarget.MANUFACTURING: "manufacturing_detail",
+}
+
+
+class ActivityLog(models.Model):
+    """One row per action a user takes in the system.
+
+    Rows outlive what they describe: the actor, the target and the project are
+    each stored twice — as a nullable foreign key for linking, and as a text
+    snapshot taken at the time. Deleting a user or a project therefore empties
+    the links but leaves the history readable.
+    """
+
+    created_at = models.DateTimeField("وقت الحدث", default=timezone.now)
+    actor = models.ForeignKey(
+        User, verbose_name="المنفّذ", on_delete=models.SET_NULL,
+        blank=True, null=True, related_name="activities",
+    )
+    actor_name = models.CharField("اسم المنفّذ", max_length=100, blank=True)
+    action = models.CharField("الإجراء", max_length=20, choices=ActivityAction.choices)
+    target_type = models.CharField(
+        "نوع العنصر", max_length=20, choices=ActivityTarget.choices,
+    )
+    target_id = models.PositiveIntegerField("رقم العنصر", blank=True, null=True)
+    target_label = models.CharField("العنصر", max_length=200, blank=True)
+    description = models.CharField("التفاصيل", max_length=300)
+    project = models.ForeignKey(
+        Project, verbose_name="المشروع", on_delete=models.SET_NULL,
+        blank=True, null=True, related_name="activities",
+    )
+    project_name = models.CharField("اسم المشروع", max_length=200, blank=True)
+
+    class Meta:
+        verbose_name = "حدث"
+        verbose_name_plural = "حركة الأنشطة"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["project"]),
+            models.Index(fields=["actor"]),
+            models.Index(fields=["target_type"]),
+        ]
+
+    def __str__(self):
+        return self.description
+
+    @property
+    def target_url(self):
+        """The target's own page, or None when it has none or was deleted."""
+        route = _TARGET_ROUTES.get(self.target_type)
+        if not route or not self.target_id:
+            return None
+        return reverse(route, args=[self.target_id])
+
+    @property
+    def project_url(self):
+        """The affected project's page — empty once the project is deleted."""
+        if not self.project_id:
+            return None
+        return reverse("project_detail", args=[self.project_id])

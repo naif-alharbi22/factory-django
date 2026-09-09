@@ -1,0 +1,77 @@
+{% load fmt %}
+<div id="activity-table" class="card bg-base-100 shadow-sm">
+  <div class="overflow-x-auto">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th class="w-40">الوقت</th>
+          <th class="w-40">المنفّذ</th>
+          <th class="w-28">الإجراء</th>
+          <th>التفاصيل</th>
+          <th class="w-52">المشروع</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in activities %}
+        <tr class="hover">
+          <td class="nums whitespace-nowrap text-xs opacity-70">{{ item.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="text-xs">
+            {% if item.actor_name %}
+              <div class="flex items-center gap-2">
+                <div class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-base-200 text-[10px] font-bold">
+                  {{ item.actor_name|initials }}
+                </div>
+                <span class="truncate">{{ item.actor_name }}</span>
+              </div>
+            {% else %}
+              <span class="opacity-40">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge badge-sm {{ item.action|action_badge }}">{{ item.get_action_display }}</span>
+          </td>
+          <td class="text-sm">
+            {{ item.description }}
+            <div class="text-[11px] opacity-50">{{ item.get_target_type_display }}</div>
+          </td>
+          <td class="text-xs">
+            {% if item.project_url %}
+              <a href="{{ item.project_url }}" class="link link-primary">{{ item.project_name }}</a>
+            {% elif item.project_name %}
+              <span title="حُذف المشروع">{{ item.project_name }}</span>
+            {% else %}
+              <span class="opacity-40">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5">
+            {% include "partials/empty.html" with title="لا توجد أنشطة" hint="جرّب توسيع نطاق البحث أو التواريخ" %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="flex items-center justify-between gap-3 border-t border-base-200 p-3">
+    <span class="text-xs opacity-60">
+      صفحة <span class="nums">{{ page_obj.number }}</span> من <span class="nums">{{ page_obj.paginator.num_pages }}</span>
+    </span>
+    <div class="join">
+      {% if page_obj.has_previous %}
+        <button class="btn join-item btn-sm"
+                hx-get="{% url 'activity_log' %}?page={{ page_obj.previous_page_number }}&search={{ search|urlencode }}&actor={{ actor_id }}&target={{ target_type }}&action={{ action }}&project={{ project_id }}&date_from={{ date_from }}&date_to={{ date_to }}"
+                hx-target="#activity-table" hx-swap="outerHTML" hx-push-url="true">السابق</button>
+      {% else %}<button class="btn join-item btn-sm btn-disabled">السابق</button>{% endif %}
+      {% if page_obj.has_next %}
+        <button class="btn join-item btn-sm"
+                hx-get="{% url 'activity_log' %}?page={{ page_obj.next_page_number }}&search={{ search|urlencode }}&actor={{ actor_id }}&target={{ target_type }}&action={{ action }}&project={{ project_id }}&date_from={{ date_from }}&date_to={{ date_to }}"
+                hx-target="#activity-table" hx-swap="outerHTML" hx-push-url="true">التالي</button>
+      {% else %}<button class="btn join-item btn-sm btn-disabled">التالي</button>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>

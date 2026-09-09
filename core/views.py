@@ -20,16 +20,17 @@ from django.views.decorators.http import require_POST
 
 from django.contrib.auth.models import Group
 
+from .activity import log_activity, log_create, log_delete, log_status, log_update
 from .forms import (
     ExpenseForm, GroupForm, InvoiceForm, LoginForm, ManufacturingCreateForm,
     ManufacturingPhaseForm, ManufacturingStageForm, ProjectForm,
     ProjectPaymentForm, UserCreateForm, UserEditForm, WorkerForm, WorkHourForm,
 )
 from .models import (
-    Expense, ExpenseCategory, Invoice, InvoiceStatus, Manufacturing,
-    ManufacturingPhase, ManufacturingStage, ManufacturingStageRecord, Project,
-    ProjectPayment, ProjectStatus, ProjectType, StageStatus, User, Worker,
-    WorkHour,
+    ActivityAction, ActivityLog, ActivityTarget, Expense, ExpenseCategory,
+    Invoice, InvoiceStatus, Manufacturing, ManufacturingPhase,
+    ManufacturingStage, ManufacturingStageRecord, Project, ProjectPayment,
+    ProjectStatus, ProjectType, StageStatus, User, Worker, WorkHour,
 )
 from .permissions import PERMISSION_MODULES, home_route, require_perm
 from .services import (
@@ -61,6 +62,11 @@ def login_view(request):
     if request.method == "POST" and form.is_valid():
         auth_login(request, form.get_user())
         user = form.get_user()
+        log_activity(
+            request, ActivityAction.LOGIN, None,
+            target_type=ActivityTarget.SESSION,
+            description=f"سجّل الدخول: {user.full_name}",
+        )
         messages.success(request, f"أهلاً بك، {user.full_name}")
         return redirect(home_route(user))
 
@@ -70,6 +76,11 @@ def login_view(request):
 @require_POST
 @login_required
 def logout_view(request):
+    log_activity(
+        request, ActivityAction.LOGOUT, None,
+        target_type=ActivityTarget.SESSION,
+        description=f"سجّل الخروج: {request.user.full_name}",
+    )
     auth_logout(request)
     return redirect("login")
 
@@ -91,6 +102,10 @@ def dashboard(request):
     return render(request, "dashboard.html", {
         "stats": stats,
         "active_projects": active,
+        "recent_activity": (
+            ActivityLog.objects.select_related("actor", "project")[:10]
+            if request.user.has_perm("core.view_activity") else []
+        ),
         "max_status": max_status,
         "max_type": max_type,
         "today": timezone.localdate(),
@@ -189,6 +204,7 @@ def project_create(request):
     form = ProjectForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         project = form.save()
+        log_create(request, project, f"أنشأ المشروع «{project.name}»")
         messages.success(request, f"تم إنشاء المشروع: {project.name}")
         return redirect("project_detail", pk=project.pk)
     return render(request, "projects/form.html", {"form": form, "mode": "create"})
@@ -201,6 +217,7 @@ def project_edit(request, pk):
     form = ProjectForm(request.POST or None, instance=project)
     if request.method == "POST" and form.is_valid():
         form.save()
+        log_update(request, project, f"عدّل بيانات المشروع «{project.name}»")
         messages.success(request, "تم حفظ التعديلات")
         return redirect("project_detail", pk=project.pk)
     return render(request, "projects/form.html", {
@@ -218,6 +235,7 @@ def project_add_payment(request, pk):
         payment = form.save(commit=False)
         payment.project = project
         payment.save()
+        log_create(request, payment, f"سجّل دفعة بمبلغ {payment.amount} على «{project.name}»")
         messages.success(request, "تمت إضافة الدفعة")
     else:
         messages.error(request, "تعذّر حفظ الدفعة — تحقق من البيانات")
@@ -234,6 +252,7 @@ def project_add_expense(request, pk):
         expense = form.save(commit=False)
         expense.project = project
         expense.save()
+        log_create(request, expense, f"سجّل مصروف «{expense.title}» بمبلغ {expense.amount} على «{project.name}»")
         messages.success(request, "تمت إضافة المصروف")
     else:
         messages.error(request, "تعذّر حفظ المصروف — تحقق من البيانات")
@@ -298,6 +317,7 @@ def worker_create(request):
     form = WorkerForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         worker = form.save()
+        log_create(request, worker, f"أضاف الموظف «{worker.name}»")
         messages.success(request, f"تمت إضافة الموظف: {worker.name}")
         return redirect("worker_detail", pk=worker.pk)
     return render(request, "workers/form.html", {"form": form, "mode": "create"})
@@ -310,6 +330,7 @@ def worker_edit(request, pk):
     form = WorkerForm(request.POST or None, instance=worker)
     if request.method == "POST" and form.is_valid():
         form.save()
+        log_update(request, worker, f"عدّل بيانات الموظف «{worker.name}»")
         messages.success(request, "تم حفظ بيانات الموظف")
         return redirect("worker_detail", pk=worker.pk)
     return render(request, "workers/form.html", {
@@ -324,6 +345,10 @@ def worker_toggle_active(request, pk):
     worker = get_object_or_404(Worker, pk=pk)
     worker.is_active = not worker.is_active
     worker.save(update_fields=["is_active", "updated_at"])
+    log_status(
+        request, worker,
+        f"{'فعّل' if worker.is_active else 'أوقف'} الموظف «{worker.name}»",
+    )
     messages.success(
         request, f"{worker.name}: {'تم التفعيل' if worker.is_active else 'تم الإيقاف'}"
     )
@@ -338,6 +363,10 @@ def hours_add(request):
     form = WorkHourForm(request.POST)
     if form.is_valid():
         entry = form.save()
+        log_create(
+            request, entry,
+            f"سجّل {entry.regular_hours} ساعة و{entry.overtime_hours} إضافية لـ«{entry.worker.name}»",
+        )
         messages.success(
             request, f"تم تسجيل {entry.regular_hours} ساعة لـ{entry.worker.name}"
         )
@@ -354,6 +383,10 @@ def hours_add(request):
 def hours_delete(request, pk):
     entry = get_object_or_404(WorkHour, pk=pk)
     worker_id = entry.worker_id
+    log_delete(
+        request, entry,
+        f"حذف سجل ساعات «{entry.worker.name}» بتاريخ {entry.date}",
+    )
     entry.delete()
     messages.success(request, "تم حذف سجل الساعات")
     return redirect(request.META.get("HTTP_REFERER") or reverse("worker_detail", args=[worker_id]))
@@ -369,6 +402,10 @@ def my_hours(request):
     if request.method == "POST":
         if form.is_valid():
             entry = form.save()
+            log_create(
+                request, entry,
+                f"سجّل {entry.regular_hours} ساعة و{entry.overtime_hours} إضافية لـ«{entry.worker.name}»",
+            )
             messages.success(
                 request,
                 f"تم تسجيل {entry.regular_hours} ساعة عادية و{entry.overtime_hours} إضافية لـ{entry.worker.name}",
@@ -443,6 +480,7 @@ def invoice_create(request):
         if not invoice.invoice_number:
             invoice.invoice_number = next_invoice_number()
         invoice.save()
+        log_create(request, invoice, f"أنشأ الفاتورة {invoice.invoice_number} بمبلغ {invoice.total_amount}")
         messages.success(request, f"تم إنشاء الفاتورة {invoice.invoice_number}")
         if invoice.project_id:
             return redirect("project_detail", pk=invoice.project_id)
@@ -461,6 +499,7 @@ def invoice_edit(request, pk):
     form = InvoiceForm(request.POST or None, instance=invoice)
     if request.method == "POST" and form.is_valid():
         form.save()
+        log_update(request, invoice, f"عدّل الفاتورة {invoice.invoice_number or invoice.pk}")
         messages.success(request, "تم حفظ الفاتورة")
         return redirect("invoice_list")
     return render(request, "invoices/form.html", {
@@ -475,6 +514,7 @@ def invoice_delete(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
     project_id = invoice.project_id
     number = invoice.invoice_number
+    log_delete(request, invoice, f"حذف الفاتورة {number or invoice.pk}")
     invoice.delete()
     messages.success(request, f"تم حذف الفاتورة {number}")
     if project_id and "project" in (request.META.get("HTTP_REFERER") or ""):
@@ -556,6 +596,7 @@ def user_create(request):
     form = UserCreateForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         user = form.save()
+        log_create(request, user, f"أنشأ المستخدم «{user.full_name}»")
         messages.success(request, f"تم إنشاء المستخدم: {user.full_name}")
         return redirect("user_list")
     return render(request, "users/form.html", {"form": form, "mode": "create"})
@@ -568,6 +609,7 @@ def user_edit(request, pk):
     form = UserEditForm(request.POST or None, instance=user_obj)
     if request.method == "POST" and form.is_valid():
         form.save()
+        log_update(request, user_obj, f"عدّل بيانات المستخدم «{user_obj.full_name}»")
         messages.success(request, "تم حفظ بيانات المستخدم")
         return redirect("user_list")
     return render(request, "users/form.html", {
@@ -584,6 +626,7 @@ def user_delete(request, pk):
         messages.error(request, "لا يمكنك حذف حسابك الحالي")
     else:
         name = user_obj.full_name
+        log_delete(request, user_obj, f"حذف المستخدم «{name}»")
         user_obj.delete()
         messages.success(request, f"تم حذف المستخدم: {name}")
     return redirect("user_list")
@@ -626,6 +669,7 @@ def group_create(request):
     form = GroupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         group = form.save()
+        log_create(request, group, f"أنشأ المجموعة «{group.name}»")
         messages.success(request, f"تم إنشاء المجموعة: {group.name}")
         return redirect("group_list")
     return render(request, "groups/form.html", {
@@ -641,6 +685,7 @@ def group_edit(request, pk):
     form = GroupForm(request.POST or None, instance=group)
     if request.method == "POST" and form.is_valid():
         form.save()
+        log_update(request, group, f"عدّل المجموعة «{group.name}» وصلاحياتها")
         messages.success(request, f"تم حفظ المجموعة: {group.name}")
         return redirect("group_list")
     return render(request, "groups/form.html", {
@@ -661,6 +706,7 @@ def group_delete(request, pk):
         )
     else:
         name = group.name
+        log_delete(request, group, f"حذف المجموعة «{name}»")
         group.delete()
         messages.success(request, f"تم حذف المجموعة: {name}")
     return redirect("group_list")
@@ -690,6 +736,10 @@ def manufacturing_create(request):
         except ValueError as exc:
             messages.error(request, str(exc))
             return redirect("manufacturing_list")
+        log_create(
+            request, manufacturing,
+            f"أنشأ متابعة تصنيع لمشروع «{manufacturing.project.name}»",
+        )
         messages.success(request, f"تم إنشاء متابعة التصنيع: {manufacturing.project.name}")
         return redirect("manufacturing_detail", pk=manufacturing.pk)
     messages.error(request, "اختر مشروعاً بلا متابعة تصنيع")
@@ -734,12 +784,14 @@ def manufacturing_record_status(request, pk):
         record.status = StageStatus.IN_PROGRESS
         record.started_at = timezone.now()
         record.save(update_fields=["status", "started_at", "updated_at"])
+        log_status(request, record, f"بدأ خطوة التصنيع «{record.stage.name}»")
         messages.success(request, f"بدأت الخطوة: {record.stage.name}")
     elif action == "complete":
         record.status = StageStatus.DONE
         record.started_at = record.started_at or timezone.now()
         record.completed_at = timezone.now()
         record.save(update_fields=["status", "started_at", "completed_at", "updated_at"])
+        log_status(request, record, f"أكمل خطوة التصنيع «{record.stage.name}»")
         messages.success(request, f"اكتملت الخطوة: {record.stage.name}")
     else:
         messages.error(request, "إجراء غير صالح")
@@ -755,6 +807,7 @@ def manufacturing_record_note(request, pk):
     )
     record.notes = request.POST.get("notes", "").strip() or None
     record.save(update_fields=["notes", "updated_at"])
+    log_update(request, record, f"حدّث ملاحظات خطوة التصنيع «{record.stage.name}»")
     messages.success(request, f"حُفظت ملاحظات الخطوة: {record.stage.name}")
     return redirect("manufacturing_detail", pk=record.manufacturing_id)
 
@@ -798,6 +851,7 @@ def phase_create(request):
     form = ManufacturingPhaseForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         phase = form.save()
+        log_create(request, phase, f"أضاف مرحلة التصنيع «{phase.name}»")
         messages.success(request, f"تمت إضافة المرحلة: {phase.name}")
         return redirect("workflow_settings")
     return render(request, "manufacturing/phase_form.html", {"form": form, "mode": "create"})
@@ -810,6 +864,7 @@ def phase_edit(request, pk):
     form = ManufacturingPhaseForm(request.POST or None, instance=phase)
     if request.method == "POST" and form.is_valid():
         form.save()
+        log_update(request, phase, f"عدّل مرحلة التصنيع «{phase.name}»")
         messages.success(request, f"تم حفظ المرحلة: {phase.name}")
         return redirect("workflow_settings")
     return render(request, "manufacturing/phase_form.html", {
@@ -824,6 +879,10 @@ def phase_toggle(request, pk):
     phase = get_object_or_404(ManufacturingPhase, pk=pk)
     phase.is_active = not phase.is_active
     phase.save(update_fields=["is_active", "updated_at"])
+    log_status(
+        request, phase,
+        f"{'فعّل' if phase.is_active else 'أوقف'} مرحلة التصنيع «{phase.name}»",
+    )
     messages.success(
         request,
         f"المرحلة «{phase.name}»: {'مفعّلة' if phase.is_active else 'موقوفة'}",
@@ -843,6 +902,7 @@ def phase_delete(request, pk):
         )
     else:
         name = phase.name
+        log_delete(request, phase, f"حذف مرحلة التصنيع «{name}»")
         phase.delete()
         _renumber(ManufacturingPhase.objects.order_by("order", "id"))
         messages.success(request, f"حُذفت المرحلة: {name}")
@@ -857,6 +917,10 @@ def phase_move(request, pk):
     direction = request.POST.get("direction")
     if direction in ("up", "down"):
         _renumber(ManufacturingPhase.objects.order_by("order", "id"), phase, direction)
+        log_update(
+            request, phase,
+            f"نقل مرحلة التصنيع «{phase.name}» {'للأعلى' if direction == 'up' else 'للأسفل'}",
+        )
     return redirect("workflow_settings")
 
 
@@ -870,6 +934,7 @@ def stage_create(request):
     form = ManufacturingStageForm(request.POST or None, initial=initial)
     if request.method == "POST" and form.is_valid():
         stage = form.save()
+        log_create(request, stage, f"أضاف خطوة التصنيع «{stage.name}» إلى «{stage.phase.name}»")
         messages.success(request, f"تمت إضافة الخطوة: {stage.name}")
         return redirect("workflow_settings")
     return render(request, "manufacturing/stage_form.html", {"form": form, "mode": "create"})
@@ -889,6 +954,7 @@ def stage_edit(request, pk):
                 ManufacturingStage.objects.filter(phase_id=old_phase_id)
                 .order_by("order", "id")
             )
+        log_update(request, stage, f"عدّل خطوة التصنيع «{stage.name}»")
         messages.success(request, f"تم حفظ الخطوة: {stage.name}")
         return redirect("workflow_settings")
     return render(request, "manufacturing/stage_form.html", {
@@ -903,6 +969,10 @@ def stage_toggle(request, pk):
     stage = get_object_or_404(ManufacturingStage, pk=pk)
     stage.is_active = not stage.is_active
     stage.save(update_fields=["is_active", "updated_at"])
+    log_status(
+        request, stage,
+        f"{'فعّل' if stage.is_active else 'أوقف'} خطوة التصنيع «{stage.name}»",
+    )
     messages.success(
         request,
         f"الخطوة «{stage.name}»: {'مفعّلة' if stage.is_active else 'موقوفة'}",
@@ -923,6 +993,7 @@ def stage_delete(request, pk):
     else:
         name = stage.name
         phase_id = stage.phase_id
+        log_delete(request, stage, f"حذف خطوة التصنيع «{name}»")
         stage.delete()
         _renumber(
             ManufacturingStage.objects.filter(phase_id=phase_id).order_by("order", "id")
@@ -942,5 +1013,9 @@ def stage_move(request, pk):
             ManufacturingStage.objects.filter(phase_id=stage.phase_id)
             .order_by("order", "id"),
             stage, direction,
+        )
+        log_update(
+            request, stage,
+            f"نقل خطوة التصنيع «{stage.name}» {'للأعلى' if direction == 'up' else 'للأسفل'}",
         )
     return redirect("workflow_settings")

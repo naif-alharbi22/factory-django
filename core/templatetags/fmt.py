@@ -93,3 +93,31 @@ def initials(name):
         return "؟"
     parts = str(name).split()
     return parts[0][0] if parts else "؟"
+
+
+@register.filter
+def action_badge(action):
+    """Badge colour for an activity log action."""
+    mapping = {
+        "create": "badge-success",
+        "update": "badge-info",
+        "delete": "badge-error",
+        "status": "badge-warning",
+        "login": "badge-ghost",
+        "logout": "badge-ghost",
+    }
+    return mapping.get(action, "badge-ghost")
+
+
+@register.filter
+def action_icon(action):
+    """Small glyph standing in for an activity log action."""
+    mapping = {
+        "create": "➕",
+        "update": "✏️",
+        "delete": "🗑️",
+        "status": "🔄",
+        "login": "🔑",
+        "logout": "🚪",
+    }
+    return mapping.get(action, "•")

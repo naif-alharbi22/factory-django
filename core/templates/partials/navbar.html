@@ -39,6 +39,9 @@
         {% if perms.core.view_compare %}
           <a href="{{ u_cmp }}" class="btn btn-sm border-0 {% if request.path == u_cmp %}bg-primary-content/25{% else %}btn-ghost{% endif %}">مقارنة</a>
         {% endif %}
+        {% if perms.core.view_activity or perms.core.view_reports %}
+          <a href="{% url 'reports_index' %}" class="btn btn-sm border-0 {% if '/reports/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">التقارير</a>
+        {% endif %}
         <a href="{{ u_hours }}" class="btn btn-sm border-0 {% if request.path == u_hours %}bg-primary-content/25{% else %}btn-ghost{% endif %}">تحضير</a>
         {% if perms.core.view_users or perms.core.view_groups %}
           <a href="{% if perms.core.view_users %}{% url 'user_list' %}{% else %}{% url 'group_list' %}{% endif %}" class="btn btn-sm border-0 {% if '/users/' in request.path or '/groups/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">المستخدمون</a>
@@ -89,6 +92,7 @@
       {% if perms.core.view_invoices %}<a href="{% url 'invoice_list' %}" class="btn btn-ghost btn-xs">الفواتير</a>{% endif %}
       {% if perms.core.view_manufacturing or perms.core.view_manufacturing_config %}<a href="{% if perms.core.view_manufacturing %}{% url 'manufacturing_list' %}{% else %}{% url 'workflow_settings' %}{% endif %}" class="btn btn-ghost btn-xs">التصنيع</a>{% endif %}
       {% if perms.core.view_compare %}<a href="{% url 'compare' %}" class="btn btn-ghost btn-xs">مقارنة</a>{% endif %}
+      {% if perms.core.view_activity or perms.core.view_reports %}<a href="{% url 'reports_index' %}" class="btn btn-ghost btn-xs">التقارير</a>{% endif %}
       <a href="{% url 'my_hours' %}" class="btn btn-ghost btn-xs">تحضير</a>
       {% if perms.core.view_users or perms.core.view_groups %}<a href="{% if perms.core.view_users %}{% url 'user_list' %}{% else %}{% url 'group_list' %}{% endif %}" class="btn btn-ghost btn-xs">المستخدمون</a>{% endif %}
     </nav>

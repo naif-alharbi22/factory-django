@@ -70,6 +70,7 @@ PERMISSION_MODULES = [
     ]),
     ("التقارير", [
         ("view_reports", "تحميل تقارير المشاريع PDF"),
+        ("view_activity", "عرض حركة الأنشطة"),
     ]),
     ("المستخدمون", [
         ("view_users", "عرض المستخدمين"),
@@ -113,6 +114,7 @@ def home_route(user):
         ("view_invoices", "invoice_list"),
         ("view_manufacturing", "manufacturing_list"),
         ("view_compare", "compare"),
+        ("view_activity", "reports_index"),
         ("view_manufacturing_config", "workflow_settings"),
         ("view_users", "user_list"),
         ("view_groups", "group_list"),
@@ -122,8 +124,12 @@ def home_route(user):
     return "my_hours"
 
 
-def require_perm(codename):
-    """Require one module permission; a user with none goes to their timesheet."""
+def require_any_perm(*codenames):
+    """Require at least one of several module permissions.
+
+    Used by pages that gather more than one module — the reports section, whose
+    cards each need their own permission.
+    """
 
     def decorator(view):
         @wraps(view)
@@ -131,7 +137,7 @@ def require_perm(codename):
             user = request.user
             if not user.is_authenticated:
                 return redirect("login")
-            if user.has_perm(f"core.{codename}"):
+            if any(user.has_perm(f"core.{codename}") for codename in codenames):
                 return view(request, *args, **kwargs)
             if user.is_employee_only:
                 messages.warning(request, "ليس لديك صلاحية للوصول لهذه الصفحة")
@@ -141,3 +147,8 @@ def require_perm(codename):
         return wrapper
 
     return decorator
+
+
+def require_perm(codename):
+    """Require one module permission; a user with none goes to their timesheet."""
+    return require_any_perm(codename)
