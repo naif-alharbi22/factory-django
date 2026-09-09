@@ -41,7 +41,9 @@ done
 # through the command substitution that calls this.
 env_value() {
     [ -f .env ] || return 0
-    grep -m1 "^$1=" .env | cut -d= -f2- | sed -E 's/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/' || true
+    grep -m1 "^$1=" .env | cut -d= -f2- \
+        | sed -E 's/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/' \
+        || true
 }
 
 SUPABASE_DUMP_URL="${SUPABASE_DUMP_URL:-$(env_value SUPABASE_DUMP_URL)}"
@@ -68,7 +70,31 @@ esac
 # pg_dump refuses to talk to it.
 PG_IMAGE="${PG_IMAGE:-postgres:17}"
 
+ERR_LOG="$(mktemp)"
+trap 'rm -f "$ERR_LOG"' EXIT
+
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+# Nothing below this point may touch the target until the source has answered.
+# An unreachable Supabase used to be discovered after the target schema had
+# already been dropped, which left the database emptier than it started.
+echo "==> checking Supabase answers"
+if ! docker run --rm -i -e PGURL="$SUPABASE_DUMP_URL" "$PG_IMAGE" \
+        sh -c 'psql "$PGURL" -tAc "select 1"' >/dev/null 2>"$ERR_LOG"; then
+    echo "error: could not read from Supabase. Nothing has been touched." >&2
+    sed 's/^/       /' "$ERR_LOG" >&2
+    case "$(cat "$ERR_LOG")" in
+        *"/var/run/postgresql"*|*"No such file or directory"*)
+            echo "" >&2
+            echo "       psql fell back to a local socket, which is what happens when the" >&2
+            echo "       connection string is empty. Check the SUPABASE_DUMP_URL line in" >&2
+            echo "       .env — the URL has to be on that same line, straight after the" >&2
+            echo "       '=', with nothing between:" >&2
+            echo "         SUPABASE_DUMP_URL=postgresql://postgres.REF:PASSWORD@HOST:5432/postgres" >&2 ;;
+    esac
+    exit 1
+fi
+echo "    reachable"
 
 echo "==> checking the target database is empty"
 mkdir -p "$DUMP_DIR"
@@ -114,16 +140,32 @@ restore_into_db() {
         --no-owner --no-privileges --single-transaction
 }
 
+# Dropping the schema cannot join the restore's transaction, so a copy that
+# dies midway leaves the target with no schema at all. Say what that state is
+# and how to leave it, rather than letting the next command fail obscurely.
+on_copy_failure() {
+    echo "" >&2
+    echo "error: the copy did not finish. The target now has no schema — the drop" >&2
+    echo "       above succeeded and the restore did not. Supabase is untouched." >&2
+    echo "       Fix the cause and run this script again; it rebuilds the schema" >&2
+    echo "       from scratch. To start the app in the meantime instead, recreate" >&2
+    echo "       an empty schema and let migrations fill it:" >&2
+    echo "         docker compose -f $COMPOSE_FILE exec -T db \\" >&2
+    echo "           psql -U $POSTGRES_USER -d $POSTGRES_DB -c 'CREATE SCHEMA public;'" >&2
+    echo "         docker compose -f $COMPOSE_FILE up -d" >&2
+    exit 1
+}
+
 if [ "$KEEP_DUMP" = "1" ]; then
     echo "==> copying Supabase -> db, keeping a copy in $DUMP_DIR"
     mkdir -p "$DUMP_DIR"
-    dump_from_supabase | tee "$DUMP_FILE" | restore_into_db
+    dump_from_supabase | tee "$DUMP_FILE" | restore_into_db || on_copy_failure
     echo "    kept $DUMP_FILE ($(du -h "$DUMP_FILE" | cut -f1))"
     echo "    that file holds employee and customer records — it is covered by"
     echo "    .gitignore, and belongs nowhere near the repository."
 else
     echo "==> copying Supabase -> db (streamed; nothing written to disk)"
-    dump_from_supabase | restore_into_db
+    dump_from_supabase | restore_into_db || on_copy_failure
 fi
 
 echo "==> comparing row counts, table by table"
