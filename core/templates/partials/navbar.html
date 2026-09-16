@@ -43,8 +43,8 @@
           <a href="{% url 'reports_index' %}" class="btn btn-sm border-0 {% if '/reports/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">التقارير</a>
         {% endif %}
         <a href="{{ u_hours }}" class="btn btn-sm border-0 {% if request.path == u_hours %}bg-primary-content/25{% else %}btn-ghost{% endif %}">تحضير</a>
-        {% if perms.core.view_users or perms.core.view_groups %}
-          <a href="{% if perms.core.view_users %}{% url 'user_list' %}{% else %}{% url 'group_list' %}{% endif %}" class="btn btn-sm border-0 {% if '/users/' in request.path or '/groups/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">المستخدمون</a>
+        {% if perms.core.view_users or perms.core.view_groups or perms.core.view_dashboard %}
+          <a href="{% url 'settings_index' %}" class="btn btn-sm border-0 {% if '/settings/' in request.path or '/users/' in request.path or '/groups/' in request.path %}bg-primary-content/25{% else %}btn-ghost{% endif %}">الإعدادات</a>
         {% endif %}
       </nav>
       {% endif %}
@@ -72,6 +72,9 @@
             {% if not user.is_employee_only %}
               <li><a href="{% url 'my_hours' %}">تحضير الموظفين</a></li>
             {% endif %}
+            {% if perms.core.view_dashboard %}
+              <li><a href="{% url 'dashboard_settings_edit' %}">إعدادات لوحة المعلومات</a></li>
+            {% endif %}
             <li>
               <form method="post" action="{% url 'logout' %}">
                 {% csrf_token %}
@@ -94,7 +97,7 @@
       {% if perms.core.view_compare %}<a href="{% url 'compare' %}" class="btn btn-ghost btn-xs">مقارنة</a>{% endif %}
       {% if perms.core.view_activity or perms.core.view_reports %}<a href="{% url 'reports_index' %}" class="btn btn-ghost btn-xs">التقارير</a>{% endif %}
       <a href="{% url 'my_hours' %}" class="btn btn-ghost btn-xs">تحضير</a>
-      {% if perms.core.view_users or perms.core.view_groups %}<a href="{% if perms.core.view_users %}{% url 'user_list' %}{% else %}{% url 'group_list' %}{% endif %}" class="btn btn-ghost btn-xs">المستخدمون</a>{% endif %}
+      {% if perms.core.view_users or perms.core.view_groups or perms.core.view_dashboard %}<a href="{% url 'settings_index' %}" class="btn btn-ghost btn-xs">الإعدادات</a>{% endif %}
     </nav>
     {% endif %}
   </div>

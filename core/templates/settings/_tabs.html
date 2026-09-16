@@ -1,0 +1,30 @@
+{% comment %}
+  The settings section's own navigation — included by every page that belongs
+  to it, so the user moves between sections without going back to the index.
+  `active` names the current section: users, groups or dashboard.
+{% endcomment %}
+<div class="mb-5">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-bold">الإعدادات</h1>
+      <p class="mt-1 text-sm opacity-60">المستخدمون والمجموعات وإعدادات لوحة المعلومات</p>
+    </div>
+  </div>
+
+  <div role="tablist" class="tabs tabs-box mt-4 w-fit max-w-full overflow-x-auto">
+    <a role="tab" href="{% url 'settings_index' %}"
+       class="tab {% if active == 'index' %}tab-active{% endif %}">نظرة عامة</a>
+    {% if perms.core.view_users %}
+      <a role="tab" href="{% url 'user_list' %}"
+         class="tab {% if active == 'users' %}tab-active{% endif %}">المستخدمون</a>
+    {% endif %}
+    {% if perms.core.view_groups %}
+      <a role="tab" href="{% url 'group_list' %}"
+         class="tab {% if active == 'groups' %}tab-active{% endif %}">المجموعات والصلاحيات</a>
+    {% endif %}
+    {% if perms.core.view_dashboard %}
+      <a role="tab" href="{% url 'dashboard_settings_edit' %}"
+         class="tab {% if active == 'dashboard' %}tab-active{% endif %}">لوحة المعلومات</a>
+    {% endif %}
+  </div>
+</div>

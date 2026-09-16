@@ -4,6 +4,8 @@ Field labels (verbose_name) and choice labels are user-facing, so they stay
 Arabic like the rest of the interface.
 """
 
+from calendar import monthrange
+from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
@@ -93,6 +95,96 @@ class User(AbstractBaseUser, PermissionsMixin):
         if self.is_superuser:
             return False
         return not self.get_all_permissions()
+
+
+class DashboardPeriod(models.TextChoices):
+    """How far back the dashboard looks.
+
+    The value of every window except ALL is its length in months, so
+    window_start() can derive the cut-off without a branch per choice.
+    """
+
+    LAST_3_MONTHS = "3m", "آخر ٣ شهور"
+    LAST_6_MONTHS = "6m", "آخر ٦ شهور"
+    LAST_12_MONTHS = "12m", "آخر ١٢ شهر"
+    CURRENT_YEAR = "year", "السنة الحالية"
+    ALL = "all", "كل البيانات"
+
+
+class DashboardSettings(models.Model):
+    """One user's view of the dashboard.
+
+    The dashboard used to read the whole system on every visit — every project
+    ever created, however old or closed. These settings narrow it down, and
+    they are per user: each one picks the window and the depth that suit them
+    without changing what anybody else sees.
+
+    A user with no row of their own gets the defaults below, so the settings
+    are created lazily (see for_user) rather than for every account up front.
+    """
+
+    user = models.OneToOneField(
+        "User", verbose_name="المستخدم", on_delete=models.CASCADE,
+        related_name="dashboard_settings",
+    )
+    period = models.CharField(
+        "فترة البيانات", max_length=10, choices=DashboardPeriod.choices,
+        default=DashboardPeriod.LAST_6_MONTHS,
+    )
+    include_closed_projects = models.BooleanField(
+        "تضمين المشاريع المغلقة", default=False,
+    )
+    top_projects_count = models.PositiveSmallIntegerField(
+        "عدد المشاريع في «أعلى تكلفة»", default=5,
+    )
+    active_projects_count = models.PositiveSmallIntegerField(
+        "عدد صفوف «المشاريع قيد التنفيذ»", default=8,
+    )
+    activity_count = models.PositiveSmallIntegerField(
+        "عدد صفوف «آخر الأحداث»", default=10,
+    )
+    only_own_activity = models.BooleanField(
+        "عرض أحداثي أنا فقط", default=False,
+    )
+    updated_at = models.DateTimeField("آخر تعديل", auto_now=True)
+
+    class Meta:
+        verbose_name = "إعدادات لوحة المعلومات"
+        verbose_name_plural = "إعدادات لوحة المعلومات"
+
+    def __str__(self):
+        return f"إعدادات لوحة {self.user.full_name}"
+
+    @classmethod
+    def for_user(cls, user):
+        """This user's settings, unsaved defaults when they have none yet.
+
+        Reading the dashboard must not write a row, so the fallback is an
+        in-memory instance; it is saved only when the user submits the form.
+        """
+        existing = cls.objects.filter(user=user).first()
+        return existing or cls(user=user)
+
+    @property
+    def period_label(self):
+        return DashboardPeriod(self.period).label
+
+    def window_start(self):
+        """The first day the dashboard counts, or None for the whole history."""
+        today = timezone.localdate()
+        if self.period == DashboardPeriod.ALL:
+            return None
+        if self.period == DashboardPeriod.CURRENT_YEAR:
+            return today.replace(month=1, day=1)
+        months = int(self.period.removesuffix("m"))
+        # Step back whole months, keeping the day of the month; a day the
+        # target month is too short for clamps to its last day, so "آخر ٣
+        # شهور" on 31 May starts on 28 February rather than spilling into March.
+        month_index = today.month - 1 - months
+        year = today.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(today.day, monthrange(year, month)[1])
+        return date(year, month, day)
 
 
 # ===================== Reference data =====================

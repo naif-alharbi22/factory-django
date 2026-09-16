@@ -22,21 +22,25 @@ from django.contrib.auth.models import Group
 
 from .activity import log_activity, log_create, log_delete, log_status, log_update
 from .forms import (
-    ExpenseForm, GroupForm, InvoiceForm, LoginForm, ManufacturingCreateForm,
-    ManufacturingPhaseForm, ManufacturingStageForm, ProjectForm,
-    ProjectPaymentForm, UserCreateForm, UserEditForm, WorkerForm, WorkHourForm,
+    DashboardSettingsForm, ExpenseForm, GroupForm, InvoiceForm, LoginForm,
+    ManufacturingCreateForm, ManufacturingPhaseForm, ManufacturingStageForm,
+    ProjectForm, ProjectPaymentForm, UserCreateForm, UserEditForm, WorkerForm,
+    WorkHourForm,
 )
 from .models import (
-    ActivityAction, ActivityLog, ActivityTarget, Expense, ExpenseCategory,
-    Invoice, InvoiceStatus, Manufacturing, ManufacturingPhase,
-    ManufacturingStage, ManufacturingStageRecord, Project, ProjectPayment,
-    ProjectStatus, ProjectType, StageStatus, User, Worker, WorkHour,
+    ActivityAction, ActivityLog, ActivityTarget, DashboardSettings, Expense,
+    ExpenseCategory, Invoice, InvoiceStatus, Manufacturing,
+    ManufacturingPhase, ManufacturingStage, ManufacturingStageRecord, Project,
+    ProjectPayment, ProjectStatus, ProjectType, StageStatus, User, Worker,
+    WorkHour,
 )
-from .permissions import PERMISSION_MODULES, home_route, require_perm
+from .permissions import (
+    PERMISSION_MODULES, home_route, require_any_perm, require_perm,
+)
 from .services import (
     ZERO, attach_costs, calc_project_cost, calc_project_costs_batch,
-    dashboard_stats, next_invoice_number, project_hours_with_costs,
-    worker_hours_with_costs,
+    dashboard_projects, dashboard_stats, next_invoice_number,
+    project_hours_with_costs, worker_hours_with_costs,
 )
 
 PAGE_SIZE = 20
@@ -86,13 +90,28 @@ def logout_view(request):
 
 
 # ===================== Dashboard =====================
+def _recent_activity(request, settings):
+    """The dashboard's activity feed, inside the user's chosen scope."""
+    if not request.user.has_perm("core.view_activity"):
+        return []
+    qs = ActivityLog.objects.select_related("actor", "project")
+    start = settings.window_start()
+    if start is not None:
+        qs = qs.filter(created_at__date__gte=start)
+    if settings.only_own_activity:
+        qs = qs.filter(actor=request.user)
+    return qs[:settings.activity_count]
+
+
 @login_required
 @require_perm("view_dashboard")
 def dashboard(request):
-    stats = dashboard_stats()
+    settings = DashboardSettings.for_user(request.user)
+    stats = dashboard_stats(settings)
     active = list(
-        Project.objects.filter(status=ProjectStatus.IN_PROGRESS)
-        .select_related("type").order_by("-id")[:8]
+        dashboard_projects(settings)
+        .filter(status=ProjectStatus.IN_PROGRESS)
+        .select_related("type").order_by("-id")[:settings.active_projects_count]
     )
     attach_costs(active)
 
@@ -102,13 +121,11 @@ def dashboard(request):
     return render(request, "dashboard.html", {
         "stats": stats,
         "active_projects": active,
-        "recent_activity": (
-            ActivityLog.objects.select_related("actor", "project")[:10]
-            if request.user.has_perm("core.view_activity") else []
-        ),
+        "recent_activity": _recent_activity(request, settings),
         "max_status": max_status,
         "max_type": max_type,
         "today": timezone.localdate(),
+        "dashboard_settings": settings,
     })
 
 
@@ -257,6 +274,81 @@ def project_add_expense(request, pk):
     else:
         messages.error(request, "تعذّر حفظ المصروف — تحقق من البيانات")
     return redirect("project_detail", pk=project.pk)
+
+
+def _back_to_project(project_id):
+    """Back to the project, or to the list when the record has none.
+
+    Expense.project is nullable — the legacy import carries rows that belong to
+    no project — so the edit and delete screens never assume one.
+    """
+    if project_id:
+        return redirect("project_detail", pk=project_id)
+    return redirect("project_list")
+
+
+@login_required
+@require_perm("edit_project_payment")
+def project_payment_edit(request, pk):
+    payment = get_object_or_404(
+        ProjectPayment.objects.select_related("project"), pk=pk
+    )
+    form = ProjectPaymentForm(request.POST or None, instance=payment)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        log_update(
+            request, payment,
+            f"عدّل دفعة بمبلغ {payment.amount} على «{payment.project.name}»",
+        )
+        messages.success(request, "تم حفظ الدفعة")
+        return _back_to_project(payment.project_id)
+    return render(request, "projects/payment_form.html", {
+        "form": form, "payment": payment, "project": payment.project,
+    })
+
+
+@login_required
+@require_perm("delete_project_payment")
+@require_POST
+def project_payment_delete(request, pk):
+    payment = get_object_or_404(
+        ProjectPayment.objects.select_related("project"), pk=pk
+    )
+    project_id = payment.project_id
+    log_delete(
+        request, payment,
+        f"حذف دفعة بمبلغ {payment.amount} من «{payment.project.name}»",
+    )
+    payment.delete()
+    messages.success(request, "تم حذف الدفعة")
+    return _back_to_project(project_id)
+
+
+@login_required
+@require_perm("edit_project_expense")
+def project_expense_edit(request, pk):
+    expense = get_object_or_404(Expense.objects.select_related("project"), pk=pk)
+    form = ExpenseForm(request.POST or None, instance=expense)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        log_update(request, expense, f"عدّل المصروف «{expense.title}» بمبلغ {expense.amount}")
+        messages.success(request, "تم حفظ المصروف")
+        return _back_to_project(expense.project_id)
+    return render(request, "projects/expense_form.html", {
+        "form": form, "expense": expense, "project": expense.project,
+    })
+
+
+@login_required
+@require_perm("delete_project_expense")
+@require_POST
+def project_expense_delete(request, pk):
+    expense = get_object_or_404(Expense.objects.select_related("project"), pk=pk)
+    project_id = expense.project_id
+    log_delete(request, expense, f"حذف المصروف «{expense.title}» بمبلغ {expense.amount}")
+    expense.delete()
+    messages.success(request, "تم حذف المصروف")
+    return _back_to_project(project_id)
 
 
 # ===================== Workers =====================
@@ -569,6 +661,48 @@ def compare(request):
     if _is_htmx(request):
         return render(request, "compare/_picker.html", context)
     return render(request, "compare/index.html", context)
+
+
+# ===================== Settings =====================
+# The settings section gathers what an administrator configures — the people,
+# the groups they inherit permissions from, and each user's own dashboard. The
+# dashboard itself stays on the home page; only its settings live here.
+@login_required
+@require_any_perm("view_users", "view_groups", "view_dashboard")
+def settings_index(request):
+    """The settings landing page — one card per section the user may open."""
+    return render(request, "settings/index.html", {
+        "user_count": User.objects.count() if request.user.has_perm("core.view_users") else None,
+        "group_count": Group.objects.count() if request.user.has_perm("core.view_groups") else None,
+        "dashboard_settings": (
+            DashboardSettings.for_user(request.user)
+            if request.user.has_perm("core.view_dashboard") else None
+        ),
+    })
+
+
+@login_required
+@require_perm("view_dashboard")
+def dashboard_settings_edit(request):
+    """Each user's own dashboard settings.
+
+    These are personal preferences, not administration, so they need no
+    permission of their own beyond being able to open the dashboard at all —
+    and a user can only ever reach their own row.
+    """
+    settings = DashboardSettings.for_user(request.user)
+    form = DashboardSettingsForm(
+        request.POST or None, instance=settings, user=request.user,
+    )
+    if request.method == "POST" and form.is_valid():
+        saved = form.save(commit=False)
+        saved.user = request.user
+        saved.save()
+        messages.success(request, "تم حفظ إعدادات لوحة المعلومات")
+        return redirect("settings_index")
+    return render(request, "settings/dashboard.html", {
+        "form": form, "dashboard_settings": settings,
+    })
 
 
 # ===================== Users =====================
