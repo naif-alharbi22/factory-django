@@ -206,10 +206,35 @@ def attach_costs(projects):
     return projects
 
 
-def dashboard_stats():
-    """Statistics for the dashboard page."""
+def dashboard_projects(settings):
+    """The projects one user's dashboard is allowed to see.
+
+    Everything on the page is derived from this queryset, so the scope is
+    decided once here: projects created inside the chosen window, and closed
+    ones only when the user asked for them.
+    """
+    qs = Project.objects.all()
+    start = settings.window_start()
+    if start is not None:
+        qs = qs.filter(created_at__date__gte=start)
+    if not settings.include_closed_projects:
+        qs = qs.exclude(status=ProjectStatus.CLOSED)
+    return qs
+
+
+def dashboard_stats(settings):
+    """Statistics for the dashboard page, within one user's chosen scope.
+
+    `settings` is a DashboardSettings instance — saved or not, since it is only
+    read. Invoice totals follow the same window on their own issue date, so a
+    six-month dashboard reports six months of billing rather than the system's
+    whole history.
+    """
+    projects = dashboard_projects(settings)
+    start = settings.window_start()
+
     status_counts = list(
-        Project.objects.values("status").annotate(cnt=Count("id")).order_by("-cnt")
+        projects.values("status").annotate(cnt=Count("id")).order_by("-cnt")
     )
     for row in status_counts:
         row["label"] = (
@@ -218,40 +243,47 @@ def dashboard_stats():
         )
 
     type_counts = list(
-        Project.objects.values("type__name").annotate(cnt=Count("id")).order_by("-cnt")
+        projects.values("type__name").annotate(cnt=Count("id")).order_by("-cnt")
     )
     for row in type_counts:
         row["name"] = row["type__name"] or "غير محدد"
 
-    totals = Project.objects.aggregate(
+    totals = projects.aggregate(
         total_budget=Coalesce(Sum("budget"), Value(ZERO), output_field=_money),
         total_projects=Count("id"),
     )
-    invoice_totals = Invoice.objects.aggregate(
+
+    invoices = Invoice.objects.all()
+    if start is not None:
+        invoices = invoices.filter(issue_date__gte=start)
+    invoice_totals = invoices.aggregate(
         total_invoices=Count("id"),
         paid=Coalesce(Sum("paid_amount"), Value(ZERO), output_field=_money),
         billed=Coalesce(Sum("total_amount"), Value(ZERO), output_field=_money),
     )
 
-    # Order by the same total cost that is displayed: take the top 15 by
-    # invoice value (the largest share of cost), then compute their full cost
-    # and sort that.
+    # Order by the same total cost that is displayed: shortlist by invoice
+    # value (the largest share of cost), then compute the full cost of the
+    # shortlist and sort that. The shortlist stays three times the requested
+    # count so a project that is expensive in labour rather than invoices can
+    # still climb into the list.
+    wanted = max(settings.top_projects_count, 1)
     shortlist = list(
-        Project.objects.annotate(
+        projects.annotate(
             invoices_cost=Coalesce(Sum("invoices__total_amount"), Value(ZERO), output_field=_money)
-        ).order_by("-invoices_cost")[:15]
+        ).order_by("-invoices_cost")[:wanted * 3]
     )
     shortlist_costs = calc_project_costs_batch([p.id for p in shortlist])
     for project in shortlist:
         project.cost = shortlist_costs[project.id]
-    top_projects = sorted(shortlist, key=lambda p: p.cost.total_cost, reverse=True)[:5]
+    top_projects = sorted(shortlist, key=lambda p: p.cost.total_cost, reverse=True)[:wanted]
 
     return {
         "status_counts": status_counts,
         "type_counts": type_counts,
         "total_budget": q2(totals["total_budget"]),
         "total_projects": totals["total_projects"],
-        "active_projects": Project.objects.filter(status=ProjectStatus.IN_PROGRESS).count(),
+        "active_projects": projects.filter(status=ProjectStatus.IN_PROGRESS).count(),
         "total_workers": Worker.objects.filter(is_active=True).count(),
         "total_invoices": invoice_totals["total_invoices"],
         "paid_invoices": q2(invoice_totals["paid"]),

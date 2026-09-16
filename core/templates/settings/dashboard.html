@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}إعدادات لوحة المعلومات — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+{% include "settings/_tabs.html" with active="dashboard" %}
+
+<div class="mx-auto max-w-3xl">
+  <div class="alert alert-info mb-4 py-2">
+    <span class="text-sm">
+      هذه الإعدادات خاصة بك وحدك — كل مستخدم يضبط لوحته دون أن يتغير ما يراه غيره.
+    </span>
+  </div>
+
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+    {% endif %}
+
+    <!-- نطاق البيانات -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-base">نطاق البيانات</h2>
+        <p class="text-xs opacity-60">
+          لوحة المعلومات تحسب المشاريع التي أُنشئت داخل الفترة المختارة، وفواتير الفترة نفسها —
+          بدل قراءة تاريخ النظام كاملاً في كل مرة.
+        </p>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+          {% include "partials/field.html" with field=form.period %}
+        </div>
+        <label class="label mt-2 cursor-pointer justify-start gap-3 py-1">
+          {{ form.include_closed_projects }}
+          <span class="label-text text-sm">{{ form.include_closed_projects.label }}</span>
+        </label>
+        <p class="text-xs opacity-60">
+          المشاريع المغلقة مستبعدة افتراضياً حتى تبقى اللوحة على العمل الجاري.
+        </p>
+      </div>
+    </div>
+
+    <!-- عدد الصفوف -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-base">عدد الصفوف في كل بطاقة</h2>
+        <div class="mt-2 grid gap-3 sm:grid-cols-3">
+          {% include "partials/field.html" with field=form.top_projects_count %}
+          {% include "partials/field.html" with field=form.active_projects_count %}
+          {% if perms.core.view_activity %}
+            {% include "partials/field.html" with field=form.activity_count %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- آخر الأحداث -->
+    {% if perms.core.view_activity %}
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title text-base">آخر الأحداث</h2>
+        <label class="label mt-1 cursor-pointer justify-start gap-3 py-1">
+          {{ form.only_own_activity }}
+          <span class="label-text text-sm">{{ form.only_own_activity.label }}</span>
+        </label>
+        <p class="text-xs opacity-60">
+          عند تفعيله تعرض البطاقة ما قمت به أنت فقط بدل حركة كل المستخدمين.
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="flex justify-end gap-2">
+      <a href="{% url 'settings_index' %}" class="btn btn-ghost btn-sm">إلغاء</a>
+      <button type="submit" class="btn btn-primary btn-sm">حفظ الإعدادات</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

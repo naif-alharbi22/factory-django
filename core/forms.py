@@ -10,8 +10,8 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
 
 from .models import (
-    Expense, Invoice, ManufacturingPhase, ManufacturingStage,
-    Project, ProjectPayment, User, Worker, WorkHour,
+    DashboardSettings, Expense, Invoice, ManufacturingPhase,
+    ManufacturingStage, Project, ProjectPayment, User, Worker, WorkHour,
 )
 from .permissions import ALL_CODENAMES, ALL_PERMISSIONS
 
@@ -292,6 +292,55 @@ class GroupForm(StyledModelForm):
                 )
             )
         return group
+
+
+class DashboardSettingsForm(StyledModelForm):
+    """One user's dashboard scope.
+
+    The row counts are bounded on both sides: a dashboard with no rows says
+    nothing, and one with hundreds is the whole-system view these settings
+    exist to avoid.
+    """
+
+    LIMITS = {
+        "top_projects_count": (1, 20),
+        "active_projects_count": (1, 50),
+        "activity_count": (1, 50),
+    }
+    # Settings for the activity card, which only a user who may read the
+    # activity log ever sees
+    ACTIVITY_FIELDS = ("activity_count", "only_own_activity")
+
+    class Meta:
+        model = DashboardSettings
+        fields = [
+            "period", "include_closed_projects", "top_projects_count",
+            "active_projects_count", "activity_count", "only_own_activity",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        """`user` decides which fields the form carries.
+
+        A user who cannot read the activity log never sees its card, so its two
+        settings are dropped rather than rendered — otherwise submitting the
+        form would post them as empty and quietly overwrite what is stored.
+        """
+        user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+        if user is not None and not user.has_perm("core.view_activity"):
+            for name in self.ACTIVITY_FIELDS:
+                self.fields.pop(name)
+        for name, (low, high) in self.LIMITS.items():
+            if name in self.fields:
+                self.fields[name].widget.attrs.update({"min": low, "max": high, "step": 1})
+
+    def clean(self):
+        cleaned = super().clean()
+        for name, (low, high) in self.LIMITS.items():
+            value = cleaned.get(name)
+            if value is not None and not low <= value <= high:
+                self.add_error(name, f"اختر رقماً بين {low} و{high}")
+        return cleaned
 
 
 class ManufacturingCreateForm(forms.Form):

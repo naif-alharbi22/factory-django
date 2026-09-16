@@ -28,6 +28,10 @@ urlpatterns = [
     path("projects/<int:pk>/edit/", views.project_edit, name="project_edit"),
     path("projects/<int:pk>/payments/add/", views.project_add_payment, name="project_add_payment"),
     path("projects/<int:pk>/expenses/add/", views.project_add_expense, name="project_add_expense"),
+    path("projects/payments/<int:pk>/edit/", views.project_payment_edit, name="project_payment_edit"),
+    path("projects/payments/<int:pk>/delete/", views.project_payment_delete, name="project_payment_delete"),
+    path("projects/expenses/<int:pk>/edit/", views.project_expense_edit, name="project_expense_edit"),
+    path("projects/expenses/<int:pk>/delete/", views.project_expense_delete, name="project_expense_delete"),
     path("projects/<int:pk>/report/generate/", reports.project_report_generate, name="project_report_generate"),
     path("projects/<int:pk>/report/status/", reports.project_report_status, name="project_report_status"),
     path("projects/<int:pk>/report/<int:job_id>/download/", reports.project_report_download, name="project_report_download"),
@@ -68,6 +72,9 @@ urlpatterns = [
     path("manufacturing/records/<int:pk>/status/", views.manufacturing_record_status, name="manufacturing_record_status"),
     path("manufacturing/records/<int:pk>/note/", views.manufacturing_record_note, name="manufacturing_record_note"),
     path("manufacturing/<int:pk>/", views.manufacturing_detail, name="manufacturing_detail"),
+
+    path("settings/", views.settings_index, name="settings_index"),
+    path("settings/dashboard/", views.dashboard_settings_edit, name="dashboard_settings_edit"),
 
     path("users/", views.user_list, name="user_list"),
     path("users/new/", views.user_create, name="user_create"),
