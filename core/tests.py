@@ -3,19 +3,23 @@
 Group and label strings stay Arabic: they are real data rows, not code text.
 """
 
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (
-    ActivityAction, ActivityLog, ActivityTarget, Invoice, Manufacturing,
-    ManufacturingPhase, ManufacturingStage, Project, ReportJob,
+    ActivityAction, ActivityLog, ActivityTarget, DashboardPeriod,
+    DashboardSettings, Expense, Invoice, Manufacturing, ManufacturingPhase,
+    ManufacturingStage, Project, ProjectPayment, ProjectStatus, ReportJob,
     ReportJobStatus, StageStatus, User, Worker,
 )
 from .permissions import ALL_CODENAMES, DEFAULT_GROUPS
 from .reports import _run_report_job
+from .services import calc_project_cost, dashboard_projects, dashboard_stats
 
 
 def perm(codename):
@@ -101,6 +105,7 @@ class ViewEnforcementTests(TestCase):
         ("activity_log", "view_activity", []),
         ("user_list", "view_users", []),
         ("group_list", "view_groups", []),
+        ("dashboard_settings_edit", "view_dashboard", []),
         ("group_create", "add_group", []),
         ("manufacturing_list", "view_manufacturing", []),
         ("workflow_settings", "view_manufacturing_config", []),
@@ -859,3 +864,404 @@ class ActivityLogFilterTests(TestCase):
         response = self.client.get(reverse("activity_log"), {"date_from": "not-a-date"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["total"], 2)
+
+
+class PaymentAndExpenseManagementTests(TestCase):
+    """Correcting or erasing a payment or an expense already on a project."""
+
+    def setUp(self):
+        self.admin = make_user("finance", Group.objects.get(name="مدير"))
+        self.client.force_login(self.admin)
+        self.project = Project.objects.create(name="مشروع التسويات", budget="10000")
+        self.payment = ProjectPayment.objects.create(
+            project=self.project, amount="500", payment_date="2026-01-05",
+        )
+        self.expense = Expense.objects.create(
+            project=self.project, title="مواد", amount="300",
+            expense_date="2026-01-06",
+        )
+
+    def test_edit_payment_saves_and_is_recorded(self):
+        response = self.client.post(
+            reverse("project_payment_edit", args=[self.payment.pk]),
+            {"amount": "750", "payment_date": "2026-01-07"},
+        )
+        self.assertRedirects(
+            response, reverse("project_detail", args=[self.project.pk])
+        )
+        self.payment.refresh_from_db()
+        self.assertEqual(str(self.payment.amount), "750.00")
+        entry = ActivityLog.objects.get(
+            target_type=ActivityTarget.PAYMENT, action=ActivityAction.UPDATE,
+        )
+        self.assertEqual(entry.project, self.project)
+
+    def test_delete_payment_removes_it_and_leaves_history(self):
+        self.client.post(reverse("project_payment_delete", args=[self.payment.pk]))
+        self.assertFalse(ProjectPayment.objects.filter(pk=self.payment.pk).exists())
+        entry = ActivityLog.objects.get(
+            target_type=ActivityTarget.PAYMENT, action=ActivityAction.DELETE,
+        )
+        self.assertEqual(entry.project, self.project)
+        self.assertIn("500", entry.description)
+
+    def test_edit_expense_saves_and_is_recorded(self):
+        response = self.client.post(
+            reverse("project_expense_edit", args=[self.expense.pk]),
+            {"title": "مواد ألمنيوم", "amount": "420", "expense_date": "2026-01-06"},
+        )
+        self.assertRedirects(
+            response, reverse("project_detail", args=[self.project.pk])
+        )
+        self.expense.refresh_from_db()
+        self.assertEqual(self.expense.title, "مواد ألمنيوم")
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                target_type=ActivityTarget.EXPENSE, action=ActivityAction.UPDATE,
+            ).exists()
+        )
+
+    def test_delete_expense_removes_it(self):
+        self.client.post(reverse("project_expense_delete", args=[self.expense.pk]))
+        self.assertFalse(Expense.objects.filter(pk=self.expense.pk).exists())
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                target_type=ActivityTarget.EXPENSE, action=ActivityAction.DELETE,
+            ).exists()
+        )
+
+    def test_deleting_a_payment_lowers_what_the_project_received(self):
+        """The figures on the project follow the deletion, not just the table."""
+        self.assertEqual(
+            str(calc_project_cost(self.project.pk).payments_received), "500.00"
+        )
+        self.client.post(reverse("project_payment_delete", args=[self.payment.pk]))
+        self.assertEqual(
+            str(calc_project_cost(self.project.pk).payments_received), "0.00"
+        )
+
+    def test_a_project_less_expense_falls_back_to_the_project_list(self):
+        """Expense.project is nullable, so neither screen may assume one."""
+        orphan = Expense.objects.create(
+            title="مصروف عام", amount="100", expense_date="2026-01-08",
+        )
+        self.assertEqual(
+            self.client.get(reverse("project_expense_edit", args=[orphan.pk])).status_code,
+            200,
+        )
+        response = self.client.post(
+            reverse("project_expense_delete", args=[orphan.pk])
+        )
+        self.assertRedirects(response, reverse("project_list"))
+
+
+class PaymentAndExpensePermissionTests(TestCase):
+    """The four new permissions are enforced, and start with the manager."""
+
+    # (route name, the permission it requires)
+    ROUTES = [
+        ("project_payment_edit", "edit_project_payment"),
+        ("project_payment_delete", "delete_project_payment"),
+        ("project_expense_edit", "edit_project_expense"),
+        ("project_expense_delete", "delete_project_expense"),
+    ]
+
+    def setUp(self):
+        self.project = Project.objects.create(name="مشروع الصلاحيات")
+        self.payment = ProjectPayment.objects.create(
+            project=self.project, amount="200", payment_date="2026-02-01",
+        )
+        self.expense = Expense.objects.create(
+            project=self.project, title="نقل", amount="150",
+            expense_date="2026-02-01",
+        )
+
+    def _pk_for(self, route):
+        return self.payment.pk if "payment" in route else self.expense.pk
+
+    def test_manager_holds_all_four_by_default(self):
+        held = set(
+            Group.objects.get(name="مدير")
+            .permissions.values_list("codename", flat=True)
+        )
+        self.assertTrue({codename for _, codename in self.ROUTES} <= held)
+
+    def test_accountant_holds_none_of_them_by_default(self):
+        """They start with the manager alone — the manager hands them on."""
+        held = set(
+            Group.objects.get(name="محاسب")
+            .permissions.values_list("codename", flat=True)
+        )
+        self.assertFalse({codename for _, codename in self.ROUTES} & held)
+        # The accountant can still record new ones
+        self.assertIn("add_project_payment", held)
+        self.assertIn("add_project_expense", held)
+
+    def test_missing_permission_is_denied(self):
+        user = make_user("noedit", make_group("عرض فقط", ["view_projects"]))
+        self.client.force_login(user)
+        for route, _ in self.ROUTES:
+            with self.subTest(route=route):
+                response = self.client.post(
+                    reverse(route, args=[self._pk_for(route)])
+                )
+                self.assertEqual(response.status_code, 403, route)
+        self.assertTrue(ProjectPayment.objects.filter(pk=self.payment.pk).exists())
+        self.assertTrue(Expense.objects.filter(pk=self.expense.pk).exists())
+
+    def test_permission_granted_to_any_group_opens_the_route(self):
+        """Nothing ties these permissions to the manager but the default."""
+        group = make_group("محاسب أول", ["view_projects", "delete_project_payment"])
+        self.client.force_login(make_user("senior", group))
+        response = self.client.post(
+            reverse("project_payment_delete", args=[self.payment.pk])
+        )
+        self.assertRedirects(
+            response, reverse("project_detail", args=[self.project.pk])
+        )
+        self.assertFalse(ProjectPayment.objects.filter(pk=self.payment.pk).exists())
+
+    def test_the_project_page_only_offers_what_the_user_may_do(self):
+        viewer = make_user("plain", make_group("مشاهد", ["view_projects"]))
+        self.client.force_login(viewer)
+        page = self.client.get(
+            reverse("project_detail", args=[self.project.pk])
+        ).content.decode()
+        self.assertNotIn(
+            reverse("project_payment_edit", args=[self.payment.pk]), page
+        )
+        self.assertNotIn(
+            reverse("project_expense_delete", args=[self.expense.pk]), page
+        )
+
+        self.client.force_login(make_user("full", Group.objects.get(name="مدير")))
+        page = self.client.get(
+            reverse("project_detail", args=[self.project.pk])
+        ).content.decode()
+        self.assertIn(reverse("project_payment_edit", args=[self.payment.pk]), page)
+        self.assertIn(reverse("project_expense_delete", args=[self.expense.pk]), page)
+
+
+class DashboardWindowTests(TestCase):
+    """The period each choice resolves to."""
+
+    def _settings(self, period):
+        return DashboardSettings(period=period)
+
+    def test_all_has_no_cut_off(self):
+        self.assertIsNone(self._settings(DashboardPeriod.ALL).window_start())
+
+    def test_current_year_starts_in_january(self):
+        start = self._settings(DashboardPeriod.CURRENT_YEAR).window_start()
+        self.assertEqual((start.month, start.day), (1, 1))
+        self.assertEqual(start.year, timezone.localdate().year)
+
+    def test_month_windows_step_back_that_many_months(self):
+        today = timezone.localdate()
+        for period, months in (
+            (DashboardPeriod.LAST_3_MONTHS, 3),
+            (DashboardPeriod.LAST_6_MONTHS, 6),
+            (DashboardPeriod.LAST_12_MONTHS, 12),
+        ):
+            with self.subTest(period=period):
+                start = self._settings(period).window_start()
+                elapsed = (today.year - start.year) * 12 + today.month - start.month
+                self.assertEqual(elapsed, months)
+                self.assertLess(start, today)
+
+    def test_a_short_target_month_clamps_instead_of_overflowing(self):
+        """31 May minus three months is 28/29 February, never 2 or 3 March."""
+        settings = self._settings(DashboardPeriod.LAST_3_MONTHS)
+        with patch("core.models.timezone.localdate", return_value=date(2026, 5, 31)):
+            self.assertEqual(settings.window_start(), date(2026, 2, 28))
+
+    def test_a_window_can_cross_into_the_previous_year(self):
+        settings = self._settings(DashboardPeriod.LAST_6_MONTHS)
+        with patch("core.models.timezone.localdate", return_value=date(2026, 2, 15)):
+            self.assertEqual(settings.window_start(), date(2025, 8, 15))
+
+
+class DashboardScopeTests(TestCase):
+    """The dashboard reads the user's slice of the system, not all of it."""
+
+    def setUp(self):
+        self.admin = make_user("viewer1", Group.objects.get(name="مدير"))
+        self.client.force_login(self.admin)
+        today = timezone.now()
+        self.recent = Project.objects.create(
+            name="مشروع حديث", budget="1000", created_at=today,
+        )
+        self.old = Project.objects.create(
+            name="مشروع قديم", budget="2000",
+            created_at=today - timedelta(days=400),
+        )
+        self.closed = Project.objects.create(
+            name="مشروع مغلق", budget="4000",
+            status=ProjectStatus.CLOSED, created_at=today,
+        )
+
+    def _names(self, settings):
+        return set(
+            dashboard_projects(settings).values_list("name", flat=True)
+        )
+
+    def test_default_window_hides_projects_older_than_six_months(self):
+        settings = DashboardSettings(user=self.admin)
+        self.assertEqual(settings.period, DashboardPeriod.LAST_6_MONTHS)
+        self.assertNotIn("مشروع قديم", self._names(settings))
+        self.assertIn("مشروع حديث", self._names(settings))
+
+    def test_closed_projects_are_out_until_asked_for(self):
+        settings = DashboardSettings(user=self.admin)
+        self.assertNotIn("مشروع مغلق", self._names(settings))
+        settings.include_closed_projects = True
+        self.assertIn("مشروع مغلق", self._names(settings))
+
+    def test_the_whole_history_is_still_available(self):
+        settings = DashboardSettings(
+            user=self.admin, period=DashboardPeriod.ALL,
+            include_closed_projects=True,
+        )
+        self.assertEqual(
+            self._names(settings),
+            {"مشروع حديث", "مشروع قديم", "مشروع مغلق"},
+        )
+
+    def test_totals_count_only_what_is_in_scope(self):
+        """The budget total follows the window — it is not the system's sum."""
+        scoped = dashboard_stats(DashboardSettings(user=self.admin))
+        self.assertEqual(scoped["total_projects"], 1)
+        self.assertEqual(str(scoped["total_budget"]), "1000.00")
+
+        everything = dashboard_stats(DashboardSettings(
+            user=self.admin, period=DashboardPeriod.ALL,
+            include_closed_projects=True,
+        ))
+        self.assertEqual(everything["total_projects"], 3)
+        self.assertEqual(str(everything["total_budget"]), "7000.00")
+
+    def test_invoices_follow_the_window_on_their_issue_date(self):
+        Invoice.objects.create(
+            invoice_number="INV-OLD", project=self.recent,
+            issue_date=timezone.localdate() - timedelta(days=400),
+            total_amount="900",
+        )
+        Invoice.objects.create(
+            invoice_number="INV-NEW", project=self.recent,
+            issue_date=timezone.localdate(), total_amount="100",
+        )
+        scoped = dashboard_stats(DashboardSettings(user=self.admin))
+        self.assertEqual(scoped["total_invoices"], 1)
+        self.assertEqual(str(scoped["billed_invoices"]), "100.00")
+
+    def test_row_counts_bound_each_card(self):
+        for index in range(6):
+            Project.objects.create(name=f"مشروع {index}", budget="500")
+        settings = DashboardSettings(
+            user=self.admin, top_projects_count=2, active_projects_count=3,
+        )
+        self.assertEqual(len(dashboard_stats(settings)["top_projects"]), 2)
+
+        settings.save()
+        page = self.client.get(reverse("dashboard"))
+        self.assertEqual(len(page.context["active_projects"]), 3)
+
+    def test_the_page_says_which_window_it_is_showing(self):
+        page = self.client.get(reverse("dashboard"))
+        self.assertContains(page, DashboardPeriod.LAST_6_MONTHS.label)
+
+
+class DashboardSettingsPageTests(TestCase):
+    """Each user's own settings — reachable, saved, and private to them."""
+
+    def setUp(self):
+        self.admin = make_user("owner", Group.objects.get(name="مدير"))
+        self.client.force_login(self.admin)
+
+    def test_settings_index_gathers_the_sections(self):
+        page = self.client.get(reverse("settings_index"))
+        self.assertEqual(page.status_code, 200)
+        for route in ("user_list", "group_list", "dashboard_settings_edit"):
+            self.assertContains(page, reverse(route))
+
+    def test_saving_creates_the_row_and_changes_the_dashboard(self):
+        self.assertFalse(DashboardSettings.objects.filter(user=self.admin).exists())
+        response = self.client.post(reverse("dashboard_settings_edit"), {
+            "period": DashboardPeriod.CURRENT_YEAR,
+            "include_closed_projects": "on",
+            "top_projects_count": "3",
+            "active_projects_count": "4",
+            "activity_count": "5",
+        })
+        self.assertRedirects(response, reverse("settings_index"))
+        saved = DashboardSettings.objects.get(user=self.admin)
+        self.assertEqual(saved.period, DashboardPeriod.CURRENT_YEAR)
+        self.assertTrue(saved.include_closed_projects)
+        self.assertEqual(saved.top_projects_count, 3)
+        self.assertContains(
+            self.client.get(reverse("dashboard")),
+            DashboardPeriod.CURRENT_YEAR.label,
+        )
+
+    def test_row_counts_outside_their_bounds_are_refused(self):
+        response = self.client.post(reverse("dashboard_settings_edit"), {
+            "period": DashboardPeriod.LAST_6_MONTHS,
+            "top_projects_count": "500",
+            "active_projects_count": "4",
+            "activity_count": "5",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(DashboardSettings.objects.filter(user=self.admin).exists())
+
+    def test_settings_are_private_to_each_user(self):
+        self.client.post(reverse("dashboard_settings_edit"), {
+            "period": DashboardPeriod.ALL,
+            "top_projects_count": "3",
+            "active_projects_count": "4",
+            "activity_count": "5",
+        })
+        other = make_user("neighbour", Group.objects.get(name="مدير"))
+        self.client.force_login(other)
+        self.assertContains(
+            self.client.get(reverse("dashboard")),
+            DashboardPeriod.LAST_6_MONTHS.label,
+        )
+        self.assertEqual(DashboardSettings.objects.count(), 1)
+
+    def test_a_user_who_cannot_read_the_log_never_posts_its_settings(self):
+        """Dropping the fields keeps a save from silently clearing them."""
+        no_log = make_user(
+            "nolog", make_group("بلا سجل", ["view_dashboard"]),
+        )
+        DashboardSettings.objects.create(
+            user=no_log, activity_count=25, only_own_activity=True,
+        )
+        self.client.force_login(no_log)
+        page = self.client.get(reverse("dashboard_settings_edit"))
+        self.assertNotIn("activity_count", page.context["form"].fields)
+
+        self.client.post(reverse("dashboard_settings_edit"), {
+            "period": DashboardPeriod.ALL,
+            "top_projects_count": "3",
+            "active_projects_count": "4",
+        })
+        stored = DashboardSettings.objects.get(user=no_log)
+        self.assertEqual(stored.period, DashboardPeriod.ALL)
+        self.assertEqual(stored.activity_count, 25)
+        self.assertTrue(stored.only_own_activity)
+
+    def test_the_activity_card_can_be_narrowed_to_the_user(self):
+        mine = Project.objects.create(name="مشروعي")
+        ActivityLog.objects.create(
+            actor=self.admin, action=ActivityAction.CREATE,
+            target_type=ActivityTarget.PROJECT, target_id=mine.pk,
+            description="حدث خاص بي",
+        )
+        ActivityLog.objects.create(
+            actor=make_user("someone", Group.objects.get(name="مدير")),
+            action=ActivityAction.CREATE, target_type=ActivityTarget.PROJECT,
+            target_id=mine.pk, description="حدث لغيري",
+        )
+        DashboardSettings.objects.create(user=self.admin, only_own_activity=True)
+        feed = self.client.get(reverse("dashboard")).context["recent_activity"]
+        self.assertEqual([entry.description for entry in feed], ["حدث خاص بي"])

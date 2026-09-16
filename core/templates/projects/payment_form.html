@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}تعديل دفعة — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl">
+  <div class="mb-5 flex items-center gap-3">
+    {% if project %}
+      <a href="{% url 'project_detail' project.pk %}" class="btn btn-ghost btn-sm btn-circle">→</a>
+    {% else %}
+      <a href="{% url 'project_list' %}" class="btn btn-ghost btn-sm btn-circle">→</a>
+    {% endif %}
+    <div>
+      <h1 class="text-2xl font-bold">تعديل دفعة</h1>
+      {% if project %}<p class="mt-1 text-sm opacity-60">{{ project.name }}</p>{% endif %}
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <form method="post" class="space-y-3">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          {% include "partials/field.html" with field=form.amount %}
+          {% include "partials/field.html" with field=form.payment_date %}
+          {% include "partials/field.html" with field=form.payment_method %}
+          {% include "partials/field.html" with field=form.reference_number %}
+          {% include "partials/field.html" with field=form.receipt_number %}
+        </div>
+        {% include "partials/field.html" with field=form.description %}
+
+        <div class="flex flex-wrap justify-between gap-2 pt-2">
+          {% if perms.core.delete_project_payment %}
+            <button type="submit" form="payment_delete" class="btn btn-outline btn-error btn-sm">حذف الدفعة</button>
+          {% else %}
+            <span></span>
+          {% endif %}
+          <div class="flex gap-2">
+            {% if project %}
+              <a href="{% url 'project_detail' project.pk %}" class="btn btn-ghost btn-sm">إلغاء</a>
+            {% endif %}
+            <button type="submit" class="btn btn-primary btn-sm">حفظ</button>
+          </div>
+        </div>
+      </form>
+
+      {% if perms.core.delete_project_payment %}
+      <form id="payment_delete" method="post" action="{% url 'project_payment_delete' payment.pk %}"
+            onsubmit="return confirm('حذف الدفعة نهائياً؟ سيتغيّر إجمالي المستلم على المشروع.')">
+        {% csrf_token %}
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -188,7 +188,7 @@
       </div>
       <div class="mt-2 max-h-72 overflow-x-auto">
         <table class="table table-xs">
-          <thead><tr><th>التاريخ</th><th class="text-left">المبلغ</th><th>الطريقة</th><th>البيان</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th class="text-left">المبلغ</th><th>الطريقة</th><th>البيان</th>{% if perms.core.edit_project_payment or perms.core.delete_project_payment %}<th></th>{% endif %}</tr></thead>
           <tbody>
             {% for payment in payments %}
             <tr class="hover">
@@ -196,9 +196,25 @@
               <td class="nums text-left font-medium text-success">{{ payment.amount|money }}</td>
               <td class="text-xs opacity-70">{{ payment.payment_method|default:"—" }}</td>
               <td class="max-w-32 truncate text-xs opacity-70">{{ payment.description|default:"—" }}</td>
+              {% if perms.core.edit_project_payment or perms.core.delete_project_payment %}
+              <td class="text-left">
+                <div class="flex justify-end gap-1">
+                  {% if perms.core.edit_project_payment %}
+                    <a href="{% url 'project_payment_edit' payment.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+                  {% endif %}
+                  {% if perms.core.delete_project_payment %}
+                  <form method="post" action="{% url 'project_payment_delete' payment.pk %}"
+                        onsubmit="return confirm('حذف الدفعة بمبلغ {{ payment.amount }}؟')">
+                    {% csrf_token %}
+                    <button class="btn btn-ghost btn-xs text-error">حذف</button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+              {% endif %}
             </tr>
             {% empty %}
-            <tr><td colspan="4">{% include "partials/empty.html" with title="لا توجد دفعات" %}</td></tr>
+            <tr><td colspan="5">{% include "partials/empty.html" with title="لا توجد دفعات" %}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -219,7 +235,7 @@
       </div>
       <div class="mt-2 max-h-72 overflow-x-auto">
         <table class="table table-xs">
-          <thead><tr><th>البيان</th><th>التاريخ</th><th>التصنيف</th><th class="text-left">المبلغ</th></tr></thead>
+          <thead><tr><th>البيان</th><th>التاريخ</th><th>التصنيف</th><th class="text-left">المبلغ</th>{% if perms.core.edit_project_expense or perms.core.delete_project_expense %}<th></th>{% endif %}</tr></thead>
           <tbody>
             {% for expense in expenses %}
             <tr class="hover">
@@ -227,9 +243,25 @@
               <td class="nums">{{ expense.expense_date|date:"Y-m-d" }}</td>
               <td class="text-xs opacity-70">{{ expense.category.name|default:"—" }}</td>
               <td class="nums text-left font-medium">{{ expense.amount|money }}</td>
+              {% if perms.core.edit_project_expense or perms.core.delete_project_expense %}
+              <td class="text-left">
+                <div class="flex justify-end gap-1">
+                  {% if perms.core.edit_project_expense %}
+                    <a href="{% url 'project_expense_edit' expense.pk %}" class="btn btn-ghost btn-xs">تعديل</a>
+                  {% endif %}
+                  {% if perms.core.delete_project_expense %}
+                  <form method="post" action="{% url 'project_expense_delete' expense.pk %}"
+                        onsubmit="return confirm('حذف المصروف «{{ expense.title }}»؟')">
+                    {% csrf_token %}
+                    <button class="btn btn-ghost btn-xs text-error">حذف</button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+              {% endif %}
             </tr>
             {% empty %}
-            <tr><td colspan="4">{% include "partials/empty.html" with title="لا توجد مصروفات" %}</td></tr>
+            <tr><td colspan="5">{% include "partials/empty.html" with title="لا توجد مصروفات" %}</td></tr>
             {% endfor %}
           </tbody>
         </table>

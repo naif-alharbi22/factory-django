@@ -31,7 +31,11 @@ PERMISSION_MODULES = [
         ("add_project", "إضافة مشروع"),
         ("edit_project", "تعديل مشروع"),
         ("add_project_payment", "إضافة دفعة لمشروع"),
+        ("edit_project_payment", "تعديل دفعة مشروع"),
+        ("delete_project_payment", "حذف دفعة مشروع"),
         ("add_project_expense", "إضافة مصروف لمشروع"),
+        ("edit_project_expense", "تعديل مصروف مشروع"),
+        ("delete_project_expense", "حذف مصروف مشروع"),
     ]),
     ("الموظفون", [
         ("view_workers", "عرض الموظفين وتفاصيلهم"),
@@ -92,13 +96,23 @@ ALL_CODENAMES = [codename for codename, _ in ALL_PERMISSIONS]
 # Modules not granted to non-managers by default (system administration
 # and workflow configuration)
 _ADMIN_MODULES = ("المستخدمون", "المجموعات", "إعدادات التصنيع")
+# Permissions the manager alone starts with even though their module is
+# otherwise open to the accountant: rewriting or erasing a financial record
+# that is already booked against a project. This is a *default* only — the
+# manager grants them to any group from the groups screen.
+_MANAGER_ONLY = (
+    "edit_project_payment",
+    "delete_project_payment",
+    "edit_project_expense",
+    "delete_project_expense",
+)
 # The default groups and the permissions each one carries
 DEFAULT_GROUPS = {
     "مدير": ALL_CODENAMES,
     "محاسب": [
         codename
         for label, perms in PERMISSION_MODULES if label not in _ADMIN_MODULES
-        for codename, _ in perms
+        for codename, _ in perms if codename not in _MANAGER_ONLY
     ],
     "موظف": [],
 }

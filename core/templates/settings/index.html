@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% load fmt %}
+{% block title %}الإعدادات — {{ APP_TITLE }}{% endblock %}
+
+{% block content %}
+{% include "settings/_tabs.html" with active="index" %}
+
+<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+
+  {% if perms.core.view_users %}
+  <a href="{% url 'user_list' %}"
+     class="card bg-base-100 shadow-sm transition-[border-color,box-shadow] hover:shadow-md border border-base-200 hover:border-primary/40">
+    <div class="card-body">
+      <div class="flex items-start justify-between gap-3">
+        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-xl">👤</div>
+        <span class="badge badge-sm badge-ghost nums">{{ user_count }} مستخدم</span>
+      </div>
+      <h2 class="card-title mt-3 text-base">المستخدمون</h2>
+      <p class="text-sm opacity-60">
+        إضافة الحسابات وتعديلها وإيقافها، وتحديد المجموعة التي يتبعها كل مستخدم.
+      </p>
+      <div class="mt-2 text-xs font-medium text-primary">فتح القسم ←</div>
+    </div>
+  </a>
+  {% endif %}
+
+  {% if perms.core.view_groups %}
+  <a href="{% url 'group_list' %}"
+     class="card bg-base-100 shadow-sm transition-[border-color,box-shadow] hover:shadow-md border border-base-200 hover:border-primary/40">
+    <div class="card-body">
+      <div class="flex items-start justify-between gap-3">
+        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-secondary/10 text-xl">🔑</div>
+        <span class="badge badge-sm badge-ghost nums">{{ group_count }} مجموعة</span>
+      </div>
+      <h2 class="card-title mt-3 text-base">المجموعات والصلاحيات</h2>
+      <p class="text-sm opacity-60">
+        صلاحيات كل قسم من أقسام النظام، مجمّعة في مجموعات يرثها أعضاؤها تلقائياً.
+      </p>
+      <div class="mt-2 text-xs font-medium text-primary">فتح القسم ←</div>
+    </div>
+  </a>
+  {% endif %}
+
+  {% if dashboard_settings %}
+  <a href="{% url 'dashboard_settings_edit' %}"
+     class="card bg-base-100 shadow-sm transition-[border-color,box-shadow] hover:shadow-md border border-base-200 hover:border-primary/40">
+    <div class="card-body">
+      <div class="flex items-start justify-between gap-3">
+        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-accent/10 text-xl">📊</div>
+        <span class="badge badge-sm badge-primary">{{ dashboard_settings.period_label }}</span>
+      </div>
+      <h2 class="card-title mt-3 text-base">لوحة المعلومات</h2>
+      <p class="text-sm opacity-60">
+        فترة البيانات التي تظهر في الصفحة الرئيسية وعدد الصفوف في كل بطاقة — إعداد خاص بك وحدك.
+      </p>
+      <div class="mt-2 text-xs font-medium text-primary">فتح القسم ←</div>
+    </div>
+  </a>
+  {% endif %}
+
+  {% if perms.core.view_manufacturing_config %}
+  <a href="{% url 'workflow_settings' %}"
+     class="card bg-base-100 shadow-sm transition-[border-color,box-shadow] hover:shadow-md border border-base-200 hover:border-primary/40">
+    <div class="card-body">
+      <div class="flex items-start justify-between gap-3">
+        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-warning/10 text-xl">🏭</div>
+      </div>
+      <h2 class="card-title mt-3 text-base">مراحل التصنيع</h2>
+      <p class="text-sm opacity-60">
+        ترتيب مراحل سير العمل وخطواتها — تفتح من قسم التصنيع.
+      </p>
+      <div class="mt-2 text-xs font-medium text-primary">فتح القسم ←</div>
+    </div>
+  </a>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -3,19 +3,16 @@
 {% block title %}المجموعات — {{ APP_TITLE }}{% endblock %}
 
 {% block content %}
-<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+{% include "settings/_tabs.html" with active="groups" %}
+
+<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
   <div>
-    <h1 class="text-2xl font-bold">مجموعات الصلاحيات</h1>
+    <h2 class="text-lg font-bold">مجموعات الصلاحيات</h2>
     <p class="mt-1 text-sm opacity-60">كل مجموعة تضم صلاحيات الأقسام التي تختارها، ويرثها أعضاؤها تلقائياً</p>
   </div>
-  <div class="flex flex-wrap gap-2">
-    {% if perms.core.view_users %}
-      <a href="{% url 'user_list' %}" class="btn btn-sm btn-outline">المستخدمون</a>
-    {% endif %}
-    {% if perms.core.add_group %}
-      <a href="{% url 'group_create' %}" class="btn btn-sm btn-primary">+ مجموعة جديدة</a>
-    {% endif %}
-  </div>
+  {% if perms.core.add_group %}
+    <a href="{% url 'group_create' %}" class="btn btn-sm btn-primary">+ مجموعة جديدة</a>
+  {% endif %}
 </div>
 
 <div class="grid gap-4 lg:grid-cols-2">
