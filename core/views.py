@@ -24,8 +24,8 @@ from .activity import log_activity, log_create, log_delete, log_status, log_upda
 from .forms import (
     DashboardSettingsForm, ExpenseForm, GroupForm, InvoiceForm, LoginForm,
     ManufacturingCreateForm, ManufacturingPhaseForm, ManufacturingStageForm,
-    ProjectForm, ProjectPaymentForm, UserCreateForm, UserEditForm, WorkerForm,
-    WorkHourForm,
+    GroupWorkHourForm, ProjectForm, ProjectPaymentForm, UserCreateForm,
+    UserEditForm, WorkerForm, WorkHourForm,
 )
 from .models import (
     ActivityAction, ActivityLog, ActivityTarget, DashboardSettings, Expense,
@@ -487,11 +487,26 @@ def hours_delete(request, pk):
 # ===================== Employee page =====================
 @login_required
 def my_hours(request):
-    """Timesheet page — open to every role, and the only page an employee has."""
-    today = timezone.localdate()
-    form = WorkHourForm(request.POST or None, initial={"date": today})
+    """Timesheet page — open to every role, and the only page an employee has.
 
-    if request.method == "POST":
+    Two modes: a single worker per entry, or a group entry where the same
+    project, date and hours are recorded for every selected worker.
+    """
+    today = timezone.localdate()
+    is_post = request.method == "POST"
+    mode = (request.POST if is_post else request.GET).get("mode")
+    mode = "group" if mode == "group" else "single"
+
+    form = WorkHourForm(
+        request.POST if is_post and mode == "single" else None,
+        initial={"date": today},
+    )
+    group_form = GroupWorkHourForm(
+        request.POST if is_post and mode == "group" else None,
+        initial={"date": today},
+    )
+
+    if is_post and mode == "single":
         if form.is_valid():
             entry = form.save()
             log_create(
@@ -505,6 +520,22 @@ def my_hours(request):
             return redirect("my_hours")
         messages.error(request, "تعذّر التسجيل — راجع الحقول")
 
+    if is_post and mode == "group":
+        if group_form.is_valid():
+            entries = group_form.save()
+            for entry in entries:
+                log_create(
+                    request, entry,
+                    f"سجّل (تحضير جماعي) {entry.regular_hours} ساعة و{entry.overtime_hours} إضافية لـ«{entry.worker.name}»",
+                )
+            first = entries[0]
+            messages.success(
+                request,
+                f"تم تحضير {len(entries)} موظف: {first.regular_hours} ساعة عادية و{first.overtime_hours} إضافية لكل موظف",
+            )
+            return redirect(f"{reverse('my_hours')}?mode=group")
+        messages.error(request, "تعذّر التحضير الجماعي — راجع الحقول")
+
     recent = (
         WorkHour.objects.select_related("worker", "project")
         .order_by("-created_at", "-id")[:15]
@@ -513,6 +544,8 @@ def my_hours(request):
 
     return render(request, "hours/my_hours.html", {
         "form": form,
+        "group_form": group_form,
+        "mode": mode,
         "recent": recent,
         "today": today,
         "today_count": today_count,
