@@ -15,12 +15,71 @@
     {% include "partials/stat.html" with label="آخر السجلات" value=recent|length unit="سجل" icon="🕒" tone="success" %}
   </div>
 
+  <div role="tablist" class="tabs tabs-box mb-3 w-fit max-w-full">
+    <a role="tab" href="{% url 'my_hours' %}" class="tab {% if mode != 'group' %}tab-active{% endif %}">تحضير فردي</a>
+    <a role="tab" href="{% url 'my_hours' %}?mode=group" class="tab {% if mode == 'group' %}tab-active{% endif %}">تحضير جماعي</a>
+  </div>
+
+  {% if mode == "group" %}
+  <div class="card mb-4 bg-base-100 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-base">تحضير جماعي</h2>
+      <p class="text-xs opacity-60">اختر الموظفين، ثم أدخل الساعات مرة واحدة — تُسجَّل نفس الساعات والمشروع والتاريخ لكل موظف محدد.</p>
+
+      <form method="post" class="mt-2 space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="mode" value="group">
+        {% if group_form.non_field_errors %}
+          <div class="alert alert-error py-2"><span class="text-sm">{{ group_form.non_field_errors.0 }}</span></div>
+        {% endif %}
+
+        <div>
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-medium">{{ group_form.workers.label }} <span class="text-error">*</span>
+              <span class="badge badge-primary badge-sm" data-selected-count>0</span></span>
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="search" class="input input-bordered input-sm w-56" placeholder="بحث عن موظف…" data-worker-search>
+              <button type="button" class="btn btn-ghost btn-sm" data-select="all">تحديد الكل</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-select="none">إلغاء التحديد</button>
+            </div>
+          </div>
+          <div class="grid max-h-72 gap-1 overflow-y-auto rounded-box border border-base-300 p-2 sm:grid-cols-3" data-worker-list>
+            {% for choice in group_form.workers %}
+            <label class="flex cursor-pointer items-center gap-2 rounded-box p-2 hover:bg-base-200" data-worker-name="{{ choice.choice_label }}">
+              {{ choice.tag }}
+              <span class="text-sm">{{ choice.choice_label }}</span>
+            </label>
+            {% empty %}
+            {% include "partials/empty.html" with title="لا يوجد موظفون نشطون" %}
+            {% endfor %}
+          </div>
+          {% if group_form.workers.errors %}
+            <div class="label py-1"><span class="label-text-alt text-error">{{ group_form.workers.errors.0 }}</span></div>
+          {% endif %}
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          {% include "partials/field.html" with field=group_form.project %}
+          {% include "partials/field.html" with field=group_form.date %}
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          {% include "partials/field.html" with field=group_form.regular_hours %}
+          {% include "partials/field.html" with field=group_form.overtime_hours %}
+        </div>
+        {% include "partials/field.html" with field=group_form.notes %}
+
+        <button type="submit" class="btn btn-primary w-full">تحضير الموظفين المحددين</button>
+      </form>
+    </div>
+  </div>
+  {% else %}
   <div class="card mb-4 bg-base-100 shadow-sm">
     <div class="card-body">
       <h2 class="card-title text-base">تسجيل ساعات عمل</h2>
 
       <form method="post" class="mt-2 space-y-3">
         {% csrf_token %}
+        <input type="hidden" name="mode" value="single">
         {% if form.non_field_errors %}
           <div class="alert alert-error py-2"><span class="text-sm">{{ form.non_field_errors.0 }}</span></div>
         {% endif %}
@@ -40,6 +99,7 @@
       </form>
     </div>
   </div>
+  {% endif %}
 
   <div class="card bg-base-100 shadow-sm">
     <div class="card-body">
@@ -65,4 +125,33 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if mode == "group" %}
+<script>
+(() => {
+  const list = document.querySelector("[data-worker-list]");
+  if (!list) return;
+  const boxes = () => [...list.querySelectorAll("input[type=checkbox]")];
+  const counter = document.querySelector("[data-selected-count]");
+  const refresh = () => { counter.textContent = boxes().filter((b) => b.checked).length; };
+
+  list.addEventListener("change", refresh);
+  document.querySelectorAll("[data-select]").forEach((btn) => btn.addEventListener("click", () => {
+    const on = btn.dataset.select === "all";
+    // Only the rows the search leaves visible
+    boxes().forEach((b) => { if (!b.closest("label").hidden) b.checked = on; });
+    refresh();
+  }));
+  document.querySelector("[data-worker-search]").addEventListener("input", (e) => {
+    const q = e.target.value.trim();
+    list.querySelectorAll("[data-worker-name]").forEach((row) => {
+      row.hidden = q !== "" && !row.dataset.workerName.includes(q);
+    });
+  });
+  refresh();
+})();
+</script>
+{% endif %}
 {% endblock %}

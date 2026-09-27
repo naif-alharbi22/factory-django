@@ -4,6 +4,7 @@ Group and label strings stay Arabic: they are real data rows, not code text.
 """
 
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
@@ -15,7 +16,7 @@ from .models import (
     ActivityAction, ActivityLog, ActivityTarget, DashboardPeriod,
     DashboardSettings, Expense, Invoice, Manufacturing, ManufacturingPhase,
     ManufacturingStage, Project, ProjectPayment, ProjectStatus, ReportJob,
-    ReportJobStatus, StageStatus, User, Worker,
+    ReportJobStatus, StageStatus, User, Worker, WorkHour,
 )
 from .permissions import ALL_CODENAMES, DEFAULT_GROUPS
 from .reports import _run_report_job
@@ -1265,3 +1266,72 @@ class DashboardSettingsPageTests(TestCase):
         DashboardSettings.objects.create(user=self.admin, only_own_activity=True)
         feed = self.client.get(reverse("dashboard")).context["recent_activity"]
         self.assertEqual([entry.description for entry in feed], ["حدث خاص بي"])
+
+
+class GroupTimesheetTests(TestCase):
+    """Group entry on the timesheet page: one set of hours, many workers."""
+
+    def setUp(self):
+        self.client.force_login(make_user("emp-group", Group.objects.get(name="موظف")))
+        self.project = Project.objects.create(name="مشروع التحضير")
+        self.ali = Worker.objects.create(name="علي")
+        self.omar = Worker.objects.create(name="عمر")
+        self.sami = Worker.objects.create(name="سامي")
+
+    def _post(self, **overrides):
+        data = {
+            "mode": "group",
+            "workers": [self.ali.pk, self.omar.pk],
+            "project": self.project.pk,
+            "date": "2026-09-27",
+            "regular_hours": "8",
+            "overtime_hours": "2",
+            "notes": "وردية صباحية",
+        }
+        data.update(overrides)
+        return self.client.post(reverse("my_hours"), data)
+
+    def test_group_tab_renders(self):
+        response = self.client.get(reverse("my_hours"), {"mode": "group"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["mode"], "group")
+        self.assertContains(response, "تحضير جماعي")
+        self.assertContains(response, 'name="workers"')
+
+    def test_same_hours_recorded_for_every_selected_worker(self):
+        response = self._post()
+        self.assertRedirects(response, reverse("my_hours") + "?mode=group")
+        entries = WorkHour.objects.order_by("worker__name")
+        self.assertEqual([e.worker for e in entries], [self.ali, self.omar])
+        for entry in entries:
+            self.assertEqual(entry.project, self.project)
+            self.assertEqual(entry.date, date(2026, 9, 27))
+            self.assertEqual(entry.regular_hours, Decimal("8"))
+            self.assertEqual(entry.overtime_hours, Decimal("2"))
+            self.assertEqual(entry.notes, "وردية صباحية")
+        self.assertEqual(
+            ActivityLog.objects.filter(target_type=ActivityTarget.WORK_HOURS).count(), 2,
+        )
+
+    def test_no_worker_selected_saves_nothing(self):
+        response = self._post(workers=[])
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(WorkHour.objects.exists())
+        self.assertTrue(response.context["group_form"].errors["workers"])
+
+    def test_zero_hours_saves_nothing(self):
+        self._post(regular_hours="0", overtime_hours="0")
+        self.assertFalse(WorkHour.objects.exists())
+
+    def test_inactive_worker_cannot_be_selected(self):
+        self.sami.is_active = False
+        self.sami.save()
+        self._post(workers=[self.ali.pk, self.sami.pk])
+        self.assertFalse(WorkHour.objects.exists())
+
+    def test_single_mode_still_works(self):
+        self.client.post(reverse("my_hours"), {
+            "mode": "single", "worker": self.ali.pk, "date": "2026-09-27",
+            "regular_hours": "8", "overtime_hours": "0",
+        })
+        self.assertEqual(WorkHour.objects.get().worker, self.ali)

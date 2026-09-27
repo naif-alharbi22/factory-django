@@ -8,6 +8,7 @@ from decimal import Decimal
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import Group
+from django.db import transaction
 
 from .models import (
     DashboardSettings, Expense, Invoice, ManufacturingPhase,
@@ -132,6 +133,67 @@ class WorkHourForm(StyledModelForm):
         if regular > 24 or overtime > 24:
             raise forms.ValidationError("عدد الساعات في اليوم لا يتجاوز 24")
         return cleaned
+
+
+class GroupWorkHourForm(forms.Form):
+    """Group timesheet: one set of hours recorded for several workers at once."""
+
+    workers = forms.ModelMultipleChoiceField(
+        label="الموظفون", queryset=Worker.objects.none(),
+        widget=forms.CheckboxSelectMultiple,
+        error_messages={"required": "اختر موظفاً واحداً على الأقل"},
+    )
+    project = forms.ModelChoiceField(
+        label="المشروع", queryset=Project.objects.none(), required=False,
+        empty_label="بدون مشروع",
+    )
+    date = forms.DateField(label="التاريخ", widget=forms.DateInput())
+    regular_hours = forms.DecimalField(
+        label="ساعات عادية", initial=Decimal("0"), required=False,
+        max_digits=7, decimal_places=2, min_value=0,
+    )
+    overtime_hours = forms.DecimalField(
+        label="ساعات إضافية", initial=Decimal("0"), required=False,
+        max_digits=7, decimal_places=2, min_value=0,
+    )
+    notes = forms.CharField(label="ملاحظات", required=False, widget=forms.Textarea)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _style({k: v for k, v in self.fields.items() if k != "workers"})
+        self.fields["workers"].queryset = Worker.objects.filter(is_active=True).order_by("name")
+        self.fields["workers"].widget.attrs["class"] = "checkbox checkbox-primary checkbox-sm"
+        self.fields["project"].queryset = Project.objects.exclude(
+            status="CLOSED"
+        ).order_by("-id")
+        self.fields["regular_hours"].widget.attrs.update({"step": "0.5", "min": "0"})
+        self.fields["overtime_hours"].widget.attrs.update({"step": "0.5", "min": "0"})
+
+    def clean(self):
+        cleaned = super().clean()
+        regular = cleaned.get("regular_hours") or Decimal("0")
+        overtime = cleaned.get("overtime_hours") or Decimal("0")
+        if regular <= 0 and overtime <= 0:
+            raise forms.ValidationError("أدخل ساعات عادية أو إضافية")
+        if regular > 24 or overtime > 24:
+            raise forms.ValidationError("عدد الساعات في اليوم لا يتجاوز 24")
+        cleaned["regular_hours"] = regular
+        cleaned["overtime_hours"] = overtime
+        return cleaned
+
+    def save(self):
+        """Create one WorkHour per selected worker, all or nothing."""
+        data = self.cleaned_data
+        with transaction.atomic():
+            return [
+                WorkHour.objects.create(
+                    worker=worker, project=data["project"], date=data["date"],
+                    regular_hours=data["regular_hours"],
+                    overtime_hours=data["overtime_hours"],
+                    notes=data["notes"] or None,
+                )
+                for worker in data["workers"]
+            ]
 
 
 class InvoiceForm(StyledModelForm):
