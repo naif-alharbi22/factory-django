@@ -1331,7 +1331,47 @@ class GroupTimesheetTests(TestCase):
 
     def test_single_mode_still_works(self):
         self.client.post(reverse("my_hours"), {
-            "mode": "single", "worker": self.ali.pk, "date": "2026-09-27",
-            "regular_hours": "8", "overtime_hours": "0",
+            "mode": "single", "worker": self.ali.pk, "project": self.project.pk,
+            "date": "2026-09-27", "regular_hours": "8", "overtime_hours": "0",
         })
         self.assertEqual(WorkHour.objects.get().worker, self.ali)
+
+
+class TimesheetRequiresProjectTests(TestCase):
+    """Hours are always charged to a project — every entry point refuses none."""
+
+    def setUp(self):
+        self.admin = make_user("hours-admin", Group.objects.get(name="مدير"))
+        self.client.force_login(self.admin)
+        self.worker = Worker.objects.create(name="علي")
+        self.entry = {
+            "date": "2026-10-10", "regular_hours": "8", "overtime_hours": "0",
+        }
+
+    def test_group_entry_without_project_is_refused(self):
+        response = self.client.post(reverse("my_hours"), {
+            **self.entry, "mode": "group", "workers": [self.worker.pk],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(WorkHour.objects.exists())
+        self.assertIn("project", response.context["group_form"].errors)
+
+    def test_single_entry_without_project_is_refused(self):
+        response = self.client.post(reverse("my_hours"), {
+            **self.entry, "mode": "single", "worker": self.worker.pk,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(WorkHour.objects.exists())
+        self.assertIn("project", response.context["form"].errors)
+
+    def test_worker_page_entry_without_project_is_refused(self):
+        self.client.post(reverse("hours_add"), {
+            **self.entry, "worker": self.worker.pk,
+        })
+        self.assertFalse(WorkHour.objects.exists())
+
+    def test_no_project_option_is_not_offered(self):
+        response = self.client.get(reverse("my_hours"), {"mode": "group"})
+        self.assertNotContains(response, "بدون مشروع")
+        response = self.client.get(reverse("my_hours"))
+        self.assertNotContains(response, "بدون مشروع")

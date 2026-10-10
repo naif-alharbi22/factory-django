@@ -116,8 +116,10 @@ class WorkHourForm(StyledModelForm):
         self.fields["project"].queryset = Project.objects.exclude(
             status="CLOSED"
         ).order_by("-id")
-        self.fields["project"].empty_label = "بدون مشروع"
-        self.fields["project"].required = False
+        # Every hour is charged to a project — there is no "no project" entry
+        self.fields["project"].empty_label = "اختر المشروع"
+        self.fields["project"].required = True
+        self.fields["project"].error_messages["required"] = "اختر المشروع"
         self.fields["regular_hours"].widget.attrs.update({"step": "0.5", "min": "0"})
         self.fields["overtime_hours"].widget.attrs.update({"step": "0.5", "min": "0"})
         if lock_worker is not None:
@@ -144,8 +146,9 @@ class GroupWorkHourForm(forms.Form):
         error_messages={"required": "اختر موظفاً واحداً على الأقل"},
     )
     project = forms.ModelChoiceField(
-        label="المشروع", queryset=Project.objects.none(), required=False,
-        empty_label="بدون مشروع",
+        label="المشروع", queryset=Project.objects.none(),
+        empty_label="اختر المشروع",
+        error_messages={"required": "اختر المشروع"},
     )
     date = forms.DateField(label="التاريخ", widget=forms.DateInput())
     regular_hours = forms.DecimalField(
