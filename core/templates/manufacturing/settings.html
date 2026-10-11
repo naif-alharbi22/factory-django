@@ -20,6 +20,23 @@
   </div>
 </div>
 
+{% if pending_trackers %}
+<div role="alert" class="alert alert-warning mb-5">
+  <div>
+    <h3 class="font-bold">
+      <span class="nums">{{ pending_trackers }}</span> متابعة قائمة تنقصها خطوات أُضيفت هنا لاحقاً
+    </h3>
+    <p class="mt-1 text-sm">
+      كل متابعة صورة من الخطوات النشطة لحظة إنشائها، فالخطوة المضافة هنا لا تظهر فيها تلقائياً —
+      <span class="nums">{{ pending_total }}</span> خطوة بانتظار المزامنة.
+    </p>
+  </div>
+  {% if perms.core.view_manufacturing %}
+    <a href="{% url 'manufacturing_list' %}" class="btn btn-sm">مزامنة المتابعات</a>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="space-y-4">
   {% for phase in phases %}
   <div class="card bg-base-100 shadow-sm {% if not phase.is_active %}opacity-70{% endif %}">

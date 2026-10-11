@@ -9,7 +9,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-from django.db import models
+from django.db import models, transaction
 from django.urls import reverse
 from django.utils import timezone
 
@@ -580,6 +580,92 @@ class Manufacturing(models.Model):
             for stage in stages
         ])
         return manufacturing
+
+    @property
+    def missing_stages(self):
+        """The active stages this tracker has no record for yet.
+
+        A tracker is a snapshot of the stages that were active when it was
+        created, so a stage added — or re-enabled — afterwards is missing from
+        it until it is synced in.
+        """
+        return (
+            ManufacturingStage.objects
+            .filter(is_active=True, phase__is_active=True)
+            .exclude(pk__in=self.records.values_list("stage_id", flat=True))
+            .select_related("phase")
+            .order_by("phase__order", "order", "id")
+        )
+
+    def sync_stages(self):
+        """Add a record for every active stage missing from this tracker.
+
+        Existing records are never touched: their status, dates and notes
+        all survive, and the new ones start at NOT_STARTED. Workflow
+        order needs no repair — ordered_records() derives it from the phase
+        and stage order, so a stage added in the middle lands in its place.
+
+        Returns the stages that were added, in workflow order.
+        """
+        missing = list(self.missing_stages)
+        if not missing:
+            return []
+        ManufacturingStageRecord.objects.bulk_create(
+            [
+                ManufacturingStageRecord(manufacturing=self, stage=stage)
+                for stage in missing
+            ],
+            # Two syncs racing each other both see the same gap; the unique
+            # constraint settles it and the loser's duplicates are dropped.
+            ignore_conflicts=True,
+        )
+        # bulk_create writes the children directly, so the tracker's own
+        # updated_at — the "last change" the list screen shows — needs saving.
+        self.save(update_fields=["updated_at"])
+        return missing
+
+    @classmethod
+    def pending_sync_counts(cls):
+        """{tracker id: how many active stages it has no record for}.
+
+        Only trackers that are short of at least one stage appear. It answers
+        for every tracker at once in a fixed three queries, so the list screen
+        can show the gap without walking each tracker's records.
+        """
+        active = set(
+            ManufacturingStage.objects
+            .filter(is_active=True, phase__is_active=True)
+            .values_list("id", flat=True)
+        )
+        if not active:
+            return {}
+        covered = {}
+        for tracker_id, stage_id in ManufacturingStageRecord.objects.values_list(
+            "manufacturing_id", "stage_id"
+        ):
+            if stage_id in active:
+                covered.setdefault(tracker_id, set()).add(stage_id)
+        counts = {}
+        for tracker_id in cls.objects.values_list("id", flat=True):
+            missing = len(active) - len(covered.get(tracker_id, ()))
+            if missing:
+                counts[tracker_id] = missing
+        return counts
+
+    @classmethod
+    def sync_all(cls):
+        """Sync every tracker in one go.
+
+        Returns [(tracker, stages added)] for the trackers that changed, so the
+        caller can report exactly what moved and log it.
+        """
+        synced = []
+        with transaction.atomic():
+            for tracker in cls.objects.select_related("project"):
+                added = tracker.sync_stages()
+                if added:
+                    synced.append((tracker, added))
+        return synced
 
     def ordered_records(self):
         """Every record in workflow order, derived from phase and stage order."""
