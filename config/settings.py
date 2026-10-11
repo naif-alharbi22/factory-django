@@ -219,9 +219,27 @@ except (ZoneInfoNotFoundError, ValueError) as exc:
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Hashed, pre-compressed static files are what the container ships: the image
+# build runs collectstatic, and the manifest it writes is what {% static %}
+# resolves against.
+#
+# DJANGO_STATIC_FROM_FINDERS=1 opts out, for a host that has nowhere to collect
+# into — a Vercel preview's filesystem is read-only apart from a /tmp that dies
+# with the instance. WhiteNoise then serves straight from the staticfiles
+# finders, so there is no collectstatic step, no manifest to miss, and no
+# compression pass on every cold start.
+STATIC_FROM_FINDERS = _env("DJANGO_STATIC_FROM_FINDERS") == "1"
+if STATIC_FROM_FINDERS:
+    WHITENOISE_USE_FINDERS = True
+    WHITENOISE_AUTOREFRESH = True
+    _staticfiles_backend = "django.contrib.staticfiles.storage.StaticFilesStorage"
+else:
+    _staticfiles_backend = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "staticfiles": {"BACKEND": _staticfiles_backend},
 }
 
 MEDIA_URL = "media/"

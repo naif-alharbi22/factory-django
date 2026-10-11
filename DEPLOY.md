@@ -398,6 +398,54 @@ docker compose exec web sh
 
 ---
 
+## Vercel previews (not a deployment path)
+
+The repository is connected to a Vercel project, so every pull request gets a
+preview URL. That is all Vercel is for here — **production is Path A above**, a
+container image on a VPS. Nothing in a Vercel preview serves real traffic or
+touches real data.
+
+Those previews used to be broken, and the reason was easy to miss: with no
+entrypoint and no `vercel.json`, Vercel built the repository as a zero-config
+static project. The build *succeeded* — there was nothing to build — and the
+preview URL then served a directory with no `index.html`. A green checkmark on a
+preview that does not run.
+
+[`api/index.py`](api/index.py) and [`vercel.json`](vercel.json) make the preview
+run the real Django app:
+
+- **The database is disposable.** A Vercel function gets a read-only filesystem
+  with a writable `/tmp` that dies with the instance, so the preview runs SQLite
+  there, migrated and seeded on cold start. Every new instance starts empty.
+  That is intended: a preview is for clicking through a branch.
+- **Sign in** with `admin` / `preview-admin`, which the bootstrap creates with
+  the `مدير` group's permissions, and only when the throwaway database holds no
+  users. Set `PREVIEW_ADMIN_PASSWORD` (and `PREVIEW_ADMIN_USERNAME`) on the
+  Vercel project to change it, or turn on Vercel's Deployment Protection so the
+  URL needs a Vercel login first.
+- **`DEBUG` is on,** so a failing page explains itself instead of showing a
+  blank 500 — the instance holds nothing worth protecting. Set
+  `DJANGO_DEBUG=0` on the Vercel project to turn it off.
+- **PDF reports do not work.** WeasyPrint needs Pango and Cairo, which the
+  Python runtime does not carry. The import is already deferred, so only report
+  generation fails; the rest of the app runs.
+- **Everything is a default.** Each variable goes through `setdefault`, so
+  anything set on the Vercel project wins. Point `DATABASE_URL` at a real
+  database and the throwaway SQLite steps aside — and so does the bootstrap,
+  which never migrates or seeds a database it did not create.
+
+- **Static files are served from the finders.** There is nowhere to collect
+  them into, so `DJANGO_STATIC_FROM_FINDERS=1` has WhiteNoise read them through
+  Django's staticfiles finders: no `collectstatic`, no manifest to miss, and no
+  compression pass delaying every cold start.
+
+Production is untouched by all of this: the Dockerfile, the compose files and
+`entrypoint.sh` never import `api/index.py`, and `DJANGO_STATIC_FROM_FINDERS` —
+the one setting added for it — is unset in the image, so the build still runs
+`collectstatic` and ships the hashed, pre-compressed files as before.
+
+---
+
 ## Notes
 
 - Migrations run on every container start by default. If you scale to more than
