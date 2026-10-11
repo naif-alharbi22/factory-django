@@ -58,6 +58,7 @@ urlpatterns = [
 
     path("manufacturing/", views.manufacturing_list, name="manufacturing_list"),
     path("manufacturing/new/", views.manufacturing_create, name="manufacturing_create"),
+    path("manufacturing/sync/", views.manufacturing_sync_all, name="manufacturing_sync_all"),
     path("manufacturing/settings/", views.workflow_settings, name="workflow_settings"),
     path("manufacturing/settings/phases/new/", views.phase_create, name="phase_create"),
     path("manufacturing/settings/phases/<int:pk>/edit/", views.phase_edit, name="phase_edit"),
@@ -71,6 +72,7 @@ urlpatterns = [
     path("manufacturing/settings/stages/<int:pk>/move/", views.stage_move, name="stage_move"),
     path("manufacturing/records/<int:pk>/status/", views.manufacturing_record_status, name="manufacturing_record_status"),
     path("manufacturing/records/<int:pk>/note/", views.manufacturing_record_note, name="manufacturing_record_note"),
+    path("manufacturing/<int:pk>/sync/", views.manufacturing_sync, name="manufacturing_sync"),
     path("manufacturing/<int:pk>/", views.manufacturing_detail, name="manufacturing_detail"),
 
     path("settings/", views.settings_index, name="settings_index"),

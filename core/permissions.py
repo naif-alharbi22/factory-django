@@ -58,6 +58,7 @@ PERMISSION_MODULES = [
         ("add_manufacturing", "إنشاء متابعة تصنيع لمشروع"),
         ("update_manufacturing_stage", "تحديث حالة خطوة تصنيع"),
         ("add_manufacturing_note", "إضافة ملاحظات على خطوات التصنيع"),
+        ("sync_manufacturing_stages", "مزامنة الخطوات المضافة إلى متابعة قائمة"),
     ]),
     ("إعدادات التصنيع", [
         ("view_manufacturing_config", "عرض إعدادات مراحل التصنيع"),
@@ -98,13 +99,15 @@ ALL_CODENAMES = [codename for codename, _ in ALL_PERMISSIONS]
 _ADMIN_MODULES = ("المستخدمون", "المجموعات", "إعدادات التصنيع")
 # Permissions the manager alone starts with even though their module is
 # otherwise open to the accountant: rewriting or erasing a financial record
-# that is already booked against a project. This is a *default* only — the
-# manager grants them to any group from the groups screen.
+# that is already booked against a project, and reshaping a tracker that is
+# already under way. This is a *default* only — the manager grants them to any
+# group from the groups screen.
 _MANAGER_ONLY = (
     "edit_project_payment",
     "delete_project_payment",
     "edit_project_expense",
     "delete_project_expense",
+    "sync_manufacturing_stages",
 )
 # The default groups and the permissions each one carries
 DEFAULT_GROUPS = {

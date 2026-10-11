@@ -7,8 +7,23 @@
   <div>
     <h1 class="text-2xl font-bold">متابعة التصنيع</h1>
     <p class="mt-1 text-sm opacity-60"><span class="nums">{{ items|length }}</span> مشروع تحت المتابعة</p>
+    {% if pending_trackers %}
+      <p class="mt-1 text-sm text-warning">
+        <span class="nums">{{ pending_trackers }}</span> متابعة تنقصها خطوات أُضيفت للإعدادات لاحقاً
+      </p>
+    {% endif %}
   </div>
   <div class="flex flex-wrap gap-2">
+    {% if perms.core.sync_manufacturing_stages and pending_trackers %}
+      <form method="post" action="{% url 'manufacturing_sync_all' %}"
+            onsubmit="return confirm('مزامنة {{ pending_trackers }} متابعة؟ ستُضاف {{ pending_total }} خطوة بحالة «لم يبدأ». الخطوات الحالية وملاحظاتها لا تتغيّر، لكن نسب التقدم ستُعاد حسابها — ولا يوجد تراجع عن هذه العملية.')">
+        {% csrf_token %}
+        <button class="btn btn-sm btn-warning">
+          مزامنة كل المتابعات
+          <span class="badge badge-sm nums">{{ pending_trackers }}</span>
+        </button>
+      </form>
+    {% endif %}
     {% if perms.core.view_manufacturing_config %}
       <a href="{% url 'workflow_settings' %}" class="btn btn-sm btn-outline">إعدادات مراحل التصنيع</a>
     {% endif %}
@@ -30,6 +45,13 @@
           <td>
             <a href="{% url 'project_detail' m.project.pk %}" class="link link-hover font-medium">{{ m.project.name }}</a>
             {% if m.project.code %}<div class="text-[11px] opacity-50 nums">{{ m.project.code }}</div>{% endif %}
+            {% if m.missing_count %}
+              <div class="mt-1">
+                <span class="badge badge-xs badge-warning nums" title="خطوات أُضيفت للإعدادات بعد إنشاء هذه المتابعة">
+                  +{{ m.missing_count }} خطوة جديدة
+                </span>
+              </div>
+            {% endif %}
           </td>
           <td>
             {% if m.is_complete %}

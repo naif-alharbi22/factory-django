@@ -326,6 +326,271 @@ class WorkflowConfigTests(TestCase):
             Manufacturing.create_for_project(Project.objects.create(name="p4"))
 
 
+class WorkflowSyncTests(TestCase):
+    """Syncing pulls the stages added after a tracker was created into it,
+    without disturbing anything already recorded."""
+
+    def setUp(self):
+        self.stages = make_workflow(("Phase X", ["Stage A", "Stage C"]))
+        self.phase = self.stages["Stage A"].phase
+        self.m = Manufacturing.create_for_project(Project.objects.create(name="p"))
+
+    def _add_stage(self, name, order, **kwargs):
+        return ManufacturingStage.objects.create(
+            phase=self.phase, name=name, order=order, **kwargs
+        )
+
+    def test_sync_adds_the_stage_in_its_workflow_position(self):
+        """Order comes from the configuration, so a stage inserted in the
+        middle lands in the middle — the records need no renumbering."""
+        self.assertEqual(workflow_names(self.m), ["Stage A", "Stage C"])
+        self._add_stage("Stage B", 1)
+        self.stages["Stage A"].order = 0
+        self.stages["Stage A"].save()
+        added = self.m.sync_stages()
+        self.assertEqual([stage.name for stage in added], ["Stage B"])
+        self.assertEqual(workflow_names(self.m), ["Stage A", "Stage B", "Stage C"])
+
+    def test_sync_preserves_existing_records(self):
+        record = self.m.ordered_records()[0]
+        record.status = StageStatus.DONE
+        record.started_at = timezone.now()
+        record.completed_at = timezone.now()
+        record.notes = "ملاحظة محفوظة"
+        record.save()
+        self._add_stage("Stage D", 9)
+        self.m.sync_stages()
+        record.refresh_from_db()
+        self.assertEqual(record.status, StageStatus.DONE)
+        self.assertIsNotNone(record.started_at)
+        self.assertIsNotNone(record.completed_at)
+        self.assertEqual(record.notes, "ملاحظة محفوظة")
+
+    def test_synced_record_starts_from_scratch(self):
+        self._add_stage("Stage D", 9)
+        added = self.m.sync_stages()
+        record = self.m.records.get(stage=added[0])
+        self.assertEqual(record.status, StageStatus.NOT_STARTED)
+        self.assertIsNone(record.started_at)
+        self.assertIsNone(record.completed_at)
+
+    def test_sync_is_idempotent(self):
+        self._add_stage("Stage D", 9)
+        self.assertEqual(len(self.m.sync_stages()), 1)
+        self.assertEqual(self.m.sync_stages(), [])
+        self.assertEqual(self.m.records.count(), 3)
+
+    def test_sync_skips_an_inactive_stage(self):
+        self._add_stage("Stage D", 9, is_active=False)
+        self.assertEqual(self.m.sync_stages(), [])
+        self.assertEqual(self.m.records.count(), 2)
+
+    def test_sync_skips_a_stage_in_an_inactive_phase(self):
+        idle = ManufacturingPhase.objects.create(
+            name="Phase Y", order=5, is_active=False
+        )
+        ManufacturingStage.objects.create(phase=idle, name="Stage Y1", order=1)
+        self.assertEqual(self.m.sync_stages(), [])
+
+    def test_sync_picks_up_a_re_enabled_stage(self):
+        """A stage disabled when the tracker was built is missing from it, and
+        re-enabling it makes it syncable."""
+        stage = self._add_stage("Stage D", 9, is_active=False)
+        self.assertEqual(self.m.sync_stages(), [])
+        stage.is_active = True
+        stage.save()
+        self.assertEqual([s.name for s in self.m.sync_stages()], ["Stage D"])
+
+    def test_sync_recalculates_progress_and_reopens_a_finished_tracker(self):
+        for record in self.m.ordered_records():
+            record.status = StageStatus.DONE
+            record.save()
+        self.assertTrue(self.m.is_complete)
+        self.assertEqual(self.m.progress_percent, 100)
+        self._add_stage("Stage D", 9)
+        self.m.sync_stages()
+        self.assertFalse(self.m.is_complete)
+        self.assertEqual(self.m.progress_percent, 67)  # 2 of 3
+        self.assertEqual(self.m.current_record.stage.name, "Stage D")
+
+    def test_sync_touches_only_its_own_tracker(self):
+        other = Manufacturing.create_for_project(Project.objects.create(name="p2"))
+        self._add_stage("Stage D", 9)
+        self.m.sync_stages()
+        self.assertEqual(workflow_names(self.m), ["Stage A", "Stage C", "Stage D"])
+        self.assertEqual(workflow_names(other), ["Stage A", "Stage C"])
+
+    def test_sync_updates_the_tracker_timestamp(self):
+        """The list screen's "last change" column reads it, and bulk_create
+        writes the records without going through the tracker."""
+        before = self.m.updated_at
+        self._add_stage("Stage D", 9)
+        self.m.sync_stages()
+        self.m.refresh_from_db()
+        self.assertGreater(self.m.updated_at, before)
+
+    def test_missing_stages_lists_the_gap_without_closing_it(self):
+        self.assertEqual(list(self.m.missing_stages), [])
+        self._add_stage("Stage D", 9)
+        self.assertEqual([s.name for s in self.m.missing_stages], ["Stage D"])
+        self.assertEqual(self.m.records.count(), 2)
+
+    def test_pending_counts_cover_every_tracker(self):
+        other = Manufacturing.create_for_project(Project.objects.create(name="p2"))
+        self.assertEqual(Manufacturing.pending_sync_counts(), {})
+        self._add_stage("Stage D", 9)
+        self.assertEqual(
+            Manufacturing.pending_sync_counts(), {self.m.pk: 1, other.pk: 1}
+        )
+        self.m.sync_stages()
+        self.assertEqual(Manufacturing.pending_sync_counts(), {other.pk: 1})
+
+    def test_sync_all_closes_every_gap(self):
+        other = Manufacturing.create_for_project(Project.objects.create(name="p2"))
+        self._add_stage("Stage D", 9)
+        synced = Manufacturing.sync_all()
+        self.assertEqual(len(synced), 2)
+        self.assertEqual(Manufacturing.pending_sync_counts(), {})
+        for tracker in (self.m, other):
+            self.assertIn("Stage D", workflow_names(tracker))
+
+    def test_sync_all_reports_nothing_when_there_is_nothing_to_do(self):
+        self.assertEqual(Manufacturing.sync_all(), [])
+
+
+class WorkflowSyncViewTests(TestCase):
+    """The two sync routes, and the permission that guards them."""
+
+    def setUp(self):
+        self.stages = make_workflow(("Phase X", ["Stage A", "Stage C"]))
+        self.phase = self.stages["Stage A"].phase
+        self.project = Project.objects.create(name="p")
+        self.m = Manufacturing.create_for_project(self.project)
+        self.other = Manufacturing.create_for_project(
+            Project.objects.create(name="p2")
+        )
+        # Added after both trackers were built, so it is missing from both
+        ManufacturingStage.objects.create(phase=self.phase, name="Stage D", order=9)
+
+    def _manager(self, username):
+        user = make_user(username, Group.objects.get(name="مدير"))
+        self.client.force_login(user)
+        return user
+
+    def test_manager_holds_the_permission_by_default(self):
+        held = set(
+            Group.objects.get(name="مدير")
+            .permissions.values_list("codename", flat=True)
+        )
+        self.assertIn("sync_manufacturing_stages", held)
+
+    def test_accountant_does_not_hold_it_by_default(self):
+        """It reshapes a tracker already under way, so it starts with the
+        manager alone — who hands it on from the groups screen."""
+        held = set(
+            Group.objects.get(name="محاسب")
+            .permissions.values_list("codename", flat=True)
+        )
+        self.assertNotIn("sync_manufacturing_stages", held)
+        # The accountant can still run the trackers themselves
+        self.assertIn("update_manufacturing_stage", held)
+
+    def test_sync_one_adds_the_stage(self):
+        self._manager("sync-boss")
+        response = self.client.post(reverse("manufacturing_sync", args=[self.m.pk]))
+        self.assertRedirects(
+            response, reverse("manufacturing_detail", args=[self.m.pk])
+        )
+        self.assertIn("Stage D", workflow_names(self.m))
+        self.assertNotIn("Stage D", workflow_names(self.other))
+
+    def test_sync_all_adds_the_stage_everywhere(self):
+        self._manager("sync-boss2")
+        response = self.client.post(reverse("manufacturing_sync_all"))
+        self.assertRedirects(response, reverse("manufacturing_list"))
+        for tracker in (self.m, self.other):
+            self.assertIn("Stage D", workflow_names(tracker))
+
+    def test_sync_is_logged_against_the_project(self):
+        self._manager("sync-boss3")
+        self.client.post(reverse("manufacturing_sync", args=[self.m.pk]))
+        entry = ActivityLog.objects.filter(
+            target_type=ActivityTarget.MANUFACTURING
+        ).latest("id")
+        self.assertEqual(entry.action, ActivityAction.UPDATE)
+        self.assertEqual(entry.project_id, self.project.pk)
+        self.assertIn("Stage D", entry.description)
+
+    def test_missing_permission_is_denied(self):
+        user = make_user("mfg-viewer", make_group("عرض تصنيع", ["view_manufacturing"]))
+        self.client.force_login(user)
+        for response in (
+            self.client.post(reverse("manufacturing_sync", args=[self.m.pk])),
+            self.client.post(reverse("manufacturing_sync_all")),
+        ):
+            self.assertEqual(response.status_code, 403)
+        self.assertNotIn("Stage D", workflow_names(self.m))
+        self.assertNotIn("Stage D", workflow_names(self.other))
+
+    def test_get_is_rejected(self):
+        """Syncing changes data, so it is POST only."""
+        self._manager("sync-boss4")
+        self.assertEqual(
+            self.client.get(reverse("manufacturing_sync", args=[self.m.pk])).status_code,
+            405,
+        )
+        self.assertEqual(
+            self.client.get(reverse("manufacturing_sync_all")).status_code, 405
+        )
+
+    def test_permission_granted_to_any_group_opens_the_route(self):
+        """Nothing ties the permission to the manager but the default."""
+        group = make_group(
+            "مشرف تصنيع", ["view_manufacturing", "sync_manufacturing_stages"]
+        )
+        self.client.force_login(make_user("mfg-lead", group))
+        self.client.post(reverse("manufacturing_sync", args=[self.m.pk]))
+        self.assertIn("Stage D", workflow_names(self.m))
+
+    def test_the_detail_page_shows_the_gap_and_the_button(self):
+        self._manager("sync-boss5")
+        html = self.client.get(
+            reverse("manufacturing_detail", args=[self.m.pk])
+        ).content.decode()
+        self.assertIn("Stage D", html)
+        self.assertIn(reverse("manufacturing_sync", args=[self.m.pk]), html)
+
+    def test_the_detail_page_hides_the_button_without_the_permission(self):
+        user = make_user("mfg-viewer2", make_group("عرض تصنيع ٢", ["view_manufacturing"]))
+        self.client.force_login(user)
+        html = self.client.get(
+            reverse("manufacturing_detail", args=[self.m.pk])
+        ).content.decode()
+        self.assertNotIn(reverse("manufacturing_sync", args=[self.m.pk]), html)
+
+    def test_the_list_page_counts_the_trackers_behind(self):
+        self._manager("sync-boss6")
+        html = self.client.get(reverse("manufacturing_list")).content.decode()
+        self.assertIn(reverse("manufacturing_sync_all"), html)
+        self.assertIn("خطوة جديدة", html)
+
+    def test_the_settings_page_warns_that_trackers_are_behind(self):
+        """Adding a stage is where the confusion starts, so the warning lives
+        on that screen too."""
+        self._manager("sync-boss8")
+        html = self.client.get(reverse("workflow_settings")).content.decode()
+        self.assertIn("بانتظار المزامنة", html)
+        Manufacturing.sync_all()
+        html = self.client.get(reverse("workflow_settings")).content.decode()
+        self.assertNotIn("بانتظار المزامنة", html)
+
+    def test_the_list_page_drops_the_button_once_synced(self):
+        self._manager("sync-boss7")
+        Manufacturing.sync_all()
+        html = self.client.get(reverse("manufacturing_list")).content.decode()
+        self.assertNotIn(reverse("manufacturing_sync_all"), html)
+
+
 class WorkflowProgressionTests(TestCase):
     """Progression rules are generic: any names, any number of stages."""
 

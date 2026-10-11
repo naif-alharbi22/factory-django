@@ -14,8 +14,40 @@
       </p>
     </div>
   </div>
-  <a href="{% url 'project_detail' manufacturing.project.pk %}" class="btn btn-sm btn-outline">صفحة المشروع</a>
+  <div class="flex flex-wrap gap-2">
+    {% if perms.core.sync_manufacturing_stages and missing_stages %}
+      <form method="post" action="{% url 'manufacturing_sync' manufacturing.pk %}"
+            onsubmit="return confirm('إضافة {{ missing_stages|length }} خطوة جديدة إلى هذه المتابعة؟ الخطوات الحالية وملاحظاتها لا تتغيّر، لكن نسبة التقدم ستُعاد حسابها.')">
+        {% csrf_token %}
+        <button class="btn btn-sm btn-warning">
+          تحديث الخطوات
+          <span class="badge badge-sm nums">{{ missing_stages|length }}</span>
+        </button>
+      </form>
+    {% endif %}
+    <a href="{% url 'project_detail' manufacturing.project.pk %}" class="btn btn-sm btn-outline">صفحة المشروع</a>
+  </div>
 </div>
+
+{% if missing_stages %}
+<div role="alert" class="alert alert-warning mb-6">
+  <div>
+    <h3 class="font-bold">خطوات أُضيفت للإعدادات بعد إنشاء هذه المتابعة</h3>
+    <p class="mt-1 text-sm">
+      {% for stage in missing_stages %}
+        <span class="badge badge-sm badge-ghost">{{ stage.phase.name }} › {{ stage.name }}</span>
+      {% endfor %}
+    </p>
+    <p class="mt-2 text-xs opacity-80">
+      {% if perms.core.sync_manufacturing_stages %}
+        اضغط «تحديث الخطوات» لإضافتها بحالة «لم يبدأ» — تدخل في موضعها الصحيح حسب ترتيب المراحل.
+      {% else %}
+        لا تملك صلاحية المزامنة — راجع المدير لإضافتها إلى هذه المتابعة.
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endif %}
 
 <!-- شريط التقدم الكلي -->
 <div class="card mb-6 bg-base-100 shadow-sm">

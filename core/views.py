@@ -886,8 +886,15 @@ def manufacturing_list(request):
     items = list(
         Manufacturing.objects.select_related("project").order_by("-id")
     )
+    # Stages added to the configuration after a tracker was created are missing
+    # from it until synced; the screen shows that gap per row and in total.
+    pending = Manufacturing.pending_sync_counts()
+    for item in items:
+        item.missing_count = pending.get(item.pk, 0)
     return render(request, "manufacturing/list.html", {
         "items": items,
+        "pending_total": sum(pending.values()),
+        "pending_trackers": len(pending),
         "create_form": ManufacturingCreateForm(),
     })
 
@@ -922,6 +929,7 @@ def manufacturing_detail(request, pk):
     return render(request, "manufacturing/detail.html", {
         "manufacturing": manufacturing,
         "groups": manufacturing.phases_with_records(),
+        "missing_stages": list(manufacturing.missing_stages),
         "StageStatus": StageStatus,
     })
 
@@ -979,6 +987,50 @@ def manufacturing_record_note(request, pk):
     return redirect("manufacturing_detail", pk=record.manufacturing_id)
 
 
+@login_required
+@require_perm("sync_manufacturing_stages")
+@require_POST
+def manufacturing_sync(request, pk):
+    """Pull the stages added since this tracker was created into it."""
+    manufacturing = get_object_or_404(
+        Manufacturing.objects.select_related("project"), pk=pk
+    )
+    added = manufacturing.sync_stages()
+    if added:
+        names = "، ".join(stage.name for stage in added)
+        log_update(
+            request, manufacturing,
+            f"زامن خطوات التصنيع — أضاف: {names}",
+        )
+        messages.success(request, f"أُضيفت {len(added)} خطوة: {names}")
+    else:
+        messages.info(request, "لا توجد خطوات جديدة — المتابعة محدّثة")
+    return redirect("manufacturing_detail", pk=manufacturing.pk)
+
+
+@login_required
+@require_perm("sync_manufacturing_stages")
+@require_POST
+def manufacturing_sync_all(request):
+    """Sync every tracker at once, for a stage added to a live configuration."""
+    synced = Manufacturing.sync_all()
+    if synced:
+        for manufacturing, added in synced:
+            names = "، ".join(stage.name for stage in added)
+            log_update(
+                request, manufacturing,
+                f"زامن خطوات التصنيع (مزامنة شاملة) — أضاف: {names}",
+            )
+        stages_added = sum(len(added) for _, added in synced)
+        messages.success(
+            request,
+            f"تمت المزامنة: {stages_added} خطوة في {len(synced)} متابعة",
+        )
+    else:
+        messages.info(request, "لا توجد خطوات جديدة — كل المتابعات محدّثة")
+    return redirect("manufacturing_list")
+
+
 # ===================== Manufacturing workflow settings =====================
 def _renumber(siblings, moving=None, direction=None):
     """Renumber a list sequentially, optionally moving one item by one place."""
@@ -1009,7 +1061,14 @@ def workflow_settings(request):
     )
     for phase in phases:
         phase.in_use = any(stage.usage for stage in phase.stages.all())
-    return render(request, "manufacturing/settings.html", {"phases": phases})
+    # A stage added here reaches the trackers already running only once they
+    # are synced, which is where the confusion starts — so say so right here.
+    pending = Manufacturing.pending_sync_counts()
+    return render(request, "manufacturing/settings.html", {
+        "phases": phases,
+        "pending_trackers": len(pending),
+        "pending_total": sum(pending.values()),
+    })
 
 
 @login_required
